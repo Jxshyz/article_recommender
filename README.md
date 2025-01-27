@@ -1,5 +1,5 @@
 # Recommender Systems
-### In this mini project we will introduce a recommender system for news article based on the EB-NeRD dataset
+##### In this mini project we will introduce a recommender system for news article based on the EB-NeRD dataset
 
 ## Points we will cover
 - Data preprocessing
