@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from datetime import datetime, timedelta
 import gdown
 
 
@@ -26,17 +27,48 @@ def ensure_download():
     }
 
 
+# setup
+pd.set_option("display.max_rows", None)
+pd.set_option("display.max_columns", None)
+pd.set_option("display.max_colwidth", None)
+
 files = ensure_download()
 
-#   -->      Datasets     <--  #
+# See https://recsys.eb.dk/dataset/ for description of the dataset
+articles = pd.read_parquet(files["articles"])
+# behaviour_train = pd.read_parquet(files["behaviour_train"])
+# history_train = pd.read_parquet(files["history_train"])
+# behaviour_validation = pd.read_parquet(files["behaviour_validation"])
+# history_validation = pd.read_parquet(files["history_validation"])
 
-# Articles
-Articles = pd.read_parquet(files["articles"])
+# preprocessing
+articles["total_pageviews"] = articles["total_pageviews"].fillna(0)
+articles["published_time"] = pd.to_datetime(articles["published_time"])
 
-# Test set
-Bhv_test = pd.read_parquet(files["behaviour_train"])
-Hstr_test = pd.read_parquet(files["history_train"])
 
-# Validation set
-Bhv_val = pd.read_parquet(files["behaviour_validation"])
-Hstr_val = pd.read_parquet(files["history_validation"])
+def most_popular(n=5, date=None, max_age=timedelta(days=7)):
+    """
+    Baseline recommender. Suggests the most popular articles, based on 'total_pageviews'.
+
+    Args:
+        n (int, optional): Amount of returned articles. Defaults to 5.
+        date (str, optional): Date of recommendation. Format is YYYY-MM-DD. Defaults to None.
+        max_age (timedelta, optional): Maximum age of recommended articles. Defaults to timedelta(days=7).
+
+    Returns:
+        pd.DataFrame: A DataFrame containing most popular articles
+    """
+
+    filtered_articles = articles.copy()
+
+    if date:
+        date = pd.to_datetime(date)
+        filtered_articles = filtered_articles[
+            (filtered_articles["published_time"] >= date - max_age) & (filtered_articles["published_time"] <= date)
+        ]
+
+    return filtered_articles.sort_values(by="total_pageviews", ascending=False).head(n)
+
+
+print(most_popular(5, "2023-04-17"))
+print(most_popular(5))
