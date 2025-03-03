@@ -46,6 +46,10 @@ articles["total_pageviews"] = articles["total_pageviews"].fillna(0)
 articles["published_time"] = pd.to_datetime(articles["published_time"])
 
 
+def print_dataframe(df, cols=["article_id", "title", "published_time", "total_pageviews", "total_read_time"]):
+    print(df[cols])
+
+
 def most_popular(n=5, date=None, max_age=timedelta(days=7)):
     """
     Baseline recommender. Suggests the most popular articles, based on 'total_pageviews'.
@@ -70,5 +74,5 @@ def most_popular(n=5, date=None, max_age=timedelta(days=7)):
     return filtered_articles.sort_values(by="total_pageviews", ascending=False).head(n)
 
 
-print(most_popular(5, "2023-04-17"))
-print(most_popular(5))
+print_dataframe(most_popular(5, "2023-04-17"))
+print_dataframe(most_popular(1))
