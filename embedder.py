@@ -1,14 +1,16 @@
-import tensorflow_hub as hub
 import numpy as np
+from sentence_transformers import SentenceTransformer
 
-# Load the Universal Sentence Encoder
-model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
-embed = hub.load(model_url)
+model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+
+
+def cosine_similarity(vec1, vec2):
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
 
 
 # Function to get embeddings
 def get_embedding(text):
-    return embed([text])[0].numpy()
+    return model.encode([text])[0]
 
 
 # Sample texts
@@ -34,10 +36,9 @@ emb2 = get_embedding(text2)
 emb3 = get_embedding(text3)
 emb4 = get_embedding(text4)
 
-
-# Compute cosine similarity
-def cosine_similarity(vec1, vec2):
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+print(len(emb1))
+# => 384
+print(emb1[:50])
 
 
 print(f"{cosine_similarity(emb1, emb2) =}")
@@ -52,9 +53,9 @@ print(f"{cosine_similarity(emb3, emb4) =}")
 #   -> text3 and text4 are kind of similar to each other (both refer to bananas).
 #   -> the other combinations are not that similar to each other which is good (even though 1 and 4 both contain word 'market')
 
-# cosine_similarity(emb1, emb2) =np.float32(0.43082178)
-# cosine_similarity(emb1, emb3) =np.float32(0.09270866)
-# cosine_similarity(emb1, emb4) =np.float32(-0.045241166)
-# cosine_similarity(emb2, emb3) =np.float32(-0.09812768)
-# cosine_similarity(emb2, emb4) =np.float32(-0.05908279)
-# cosine_similarity(emb3, emb4) =np.float32(0.17235164)
+# cosine_similarity(emb1, emb2) =np.float32(0.68227684)
+# cosine_similarity(emb1, emb3) =np.float32(-0.0032214026)
+# cosine_similarity(emb1, emb4) =np.float32(-0.0194771)
+# cosine_similarity(emb2, emb3) =np.float32(-0.07116597)
+# cosine_similarity(emb2, emb4) =np.float32(-0.13794975)
+# cosine_similarity(emb3, emb4) =np.float32(0.18150233)
