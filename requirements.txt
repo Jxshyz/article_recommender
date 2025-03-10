@@ -1,5 +1,4 @@
 pandas
 gdown
 datetime
-tensorflow
-tensorflow-hub
+sentence_transformers
