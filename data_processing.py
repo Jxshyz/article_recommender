@@ -115,23 +115,27 @@ def cosine_similarity(vec1, vec2):
     return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
 
 
-import time
+def get_liked_items(user):
+    # TODO stub - implement correctly using user-item-matrix M
+    return most_popular(10)
 
-start_time = time.time()
-articles = get_preprocessed_articles()
-end_time = time.time()
-print(f"Loading articles time (len {len(articles)}): {end_time - start_time:.4f} seconds")
+
 # => Loading articles time (len 20738): 1177.0574 seconds (without embeddings pre-computed)
 # => Loading articles time (len 20738): 0.5313 seconds (with precomputed embeddings, just loading from disk)
 
-# Compare first article to all others
-first_embedding = articles.loc[0, "embedding"]
-start_time = time.time()
-articles["similarity_to_first"] = articles["embedding"].apply(lambda emb: cosine_similarity(first_embedding, emb))
-end_time = time.time()
-print(f"Computing cosine similarity (len {len(articles)}): {end_time - start_time:.4f} seconds")
-# => Computing cosine similarity (len 20738): 0.1999 seconds
-articles = articles.sort_values(by="similarity_to_first", ascending=False)
-# Print article_id, title, and similarity score
-for _, row in articles.head(100).iterrows():
-    print(f"ID: {row['article_id']}, Title: {row['title']}, Similarity: {row['similarity_to_first']:.4f}")
+
+def content_based_filtering(user_id="DUMMY_USER_ID", n=5):
+    articles = get_preprocessed_articles()
+
+    liked_articles = get_liked_items(user_id)
+
+    # compute mean cosine similarity between all articles and liked_articles
+    articles["mean_similarity"] = articles["embedding"].apply(
+        lambda x: np.mean([cosine_similarity(x, y) for y in liked_articles["embedding"]])
+    )
+
+    return articles.sort_values(by="mean_similarity", ascending=False).head(n)
+
+
+for _, row in content_based_filtering(user_id="DUMMY", n=100).iterrows():
+    print(f"ID: {row['article_id']}, Title: {row['title']}, Similarity: {row['mean_similarity']:.4f}")
