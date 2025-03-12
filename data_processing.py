@@ -83,7 +83,7 @@ pd.set_option("display.max_colwidth", None)
 def get_liked_items(user):
     # Returns a list of ids representing the items the given user has liked
     # TODO stub - implement correctly using user-item-matrix M
-    return baseline_filtering().head(10)["article_id"].tolist()
+    return baseline_filtering(get_preprocessed_articles()).head(10)["article_id"].tolist()
 
 
 def get_users_who_liked(item):
@@ -96,9 +96,7 @@ def cosine_similarity(vec1, vec2):
     return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
 
 
-def baseline_filtering(date=None, max_age=timedelta(days=7)):
-    articles = get_preprocessed_articles()
-
+def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
     max_pageviews = articles["total_pageviews"].max()
     articles["baseline_score"] = articles["total_pageviews"] / max_pageviews
 
@@ -116,9 +114,7 @@ def baseline_filtering(date=None, max_age=timedelta(days=7)):
     return articles.sort_values(by="baseline_score", ascending=False)
 
 
-def content_based_filtering(user_id="DUMMY_USER_ID"):
-    articles = get_preprocessed_articles()
-
+def content_based_filtering(articles, user_id="DUMMY_USER_ID"):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
 
     # compute mean cosine similarity between all articles and liked_articles
@@ -129,17 +125,17 @@ def content_based_filtering(user_id="DUMMY_USER_ID"):
     return articles.sort_values(by="contentbased_score", ascending=False)
 
 
-def collaborative_filtering(user_id="DUMMY_USER_ID"):
-    articles = get_preprocessed_articles()
-
+def collaborative_filtering(articles, user_id="DUMMY_USER_ID"):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
     similar_liked_articles = set()
 
     for _, liked_article in liked_articles.iterrows():
-        articles["similarity"] = articles["embedding"].apply(
+        articles["collaborative_cossim"] = articles["embedding"].apply(
             lambda article: cosine_similarity(liked_article["embedding"], article)
         )
-        similar_liked_articles.update(articles.nlargest(5, "similarity")["article_id"].tolist())
+        similar_liked_articles.update(articles.nlargest(5, "collaborative_cossim")["article_id"].tolist())
+
+    articles.drop(columns=["collaborative_cossim"], inplace=True)
 
     same_likes = []
     for article_id in similar_liked_articles:
@@ -168,11 +164,25 @@ def collaborative_filtering(user_id="DUMMY_USER_ID"):
     return articles.sort_values(by="collaborative_score", ascending=False)
 
 
-# for _, row in baseline_filtering().head(100).iterrows():
-#     print(f"ID: {row['article_id']}, Title: {row['title']}, baseline: {row['baseline_score']:.4f}")
+def hybrid_filtering(articles):
+    weights = {"baseline_score": 0.5, "contentbased_score": 0.25, "collaborative_score": 0.25}
 
-# for _, row in content_based_filtering(user_id="DUMMY").head(100).iterrows():
-#     print(f"ID: {row['article_id']}, Title: {row['title']}, content-based: {row['contentbased_score']:.4f}")
+    articles["hybrid_score"] = (
+        articles["baseline_score"] * weights["baseline_score"]
+        + articles["contentbased_score"] * weights["contentbased_score"]
+        + articles["collaborative_score"] * weights["collaborative_score"]
+    )
 
-# for _, row in collaborative_filtering(user_id="DUMMY").head(100).iterrows():
-#     print(f"ID: {row['article_id']}, Title: {row['title']}, collaborative: {row['collaborative_score']:.4f}")
+    return articles.sort_values(by="hybrid_score", ascending=False)
+
+
+articles = get_preprocessed_articles()
+articles = baseline_filtering(articles=articles)
+articles = content_based_filtering(articles=articles, user_id="DUMMY")
+articles = collaborative_filtering(articles=articles, user_id="DUMMY")
+articles = hybrid_filtering(articles=articles)
+
+for _, row in articles.head(100).iterrows():
+    print(
+        f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
+    )
