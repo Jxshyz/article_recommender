@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from collections import Counter
 import pandas as pd
 from datetime import datetime, timedelta
 import gdown
@@ -121,6 +122,12 @@ def get_liked_items(user):
     return most_popular(10)["article_id"].tolist()
 
 
+def get_users_who_liked(item):
+    # Returns a list of ids representing the users that have liked the given item
+    # TODO stub - implement correctly using user-item-matrix M
+    return [1, 2, 3]
+
+
 # => Loading articles time (len 20738): 1177.0574 seconds (without embeddings pre-computed)
 # => Loading articles time (len 20738): 0.5313 seconds (with precomputed embeddings, just loading from disk)
 
@@ -131,11 +138,50 @@ def content_based_filtering(user_id="DUMMY_USER_ID", n=5):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
 
     # compute mean cosine similarity between all articles and liked_articles
-    articles["mean_similarity"] = articles["embedding"].apply(
+    articles["contentbased_score"] = articles["embedding"].apply(
         lambda x: np.mean([cosine_similarity(x, y) for y in liked_articles["embedding"]])
     )
 
-    return articles.sort_values(by="mean_similarity", ascending=False).head(n)
+    return articles.sort_values(by="contentbased_score", ascending=False).head(n)
+
+
+def collaborative_filtering(user_id="DUMMY_USER_ID", n=5):
+    articles = get_preprocessed_articles()
+
+    liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
+    similar_liked_articles = set()
+
+    for _, liked_article in liked_articles.iterrows():
+        articles["similarity"] = articles["embedding"].apply(
+            lambda article: cosine_similarity(liked_article["embedding"], article)
+        )
+        similar_liked_articles.update(articles.nlargest(5, "similarity")["article_id"].tolist())
+
+    same_likes = []
+    for article_id in similar_liked_articles:
+        same_likes.extend(get_users_who_liked(article_id))
+
+    user_rank = Counter(same_likes)
+
+    user_data = []
+
+    for user_id, score in user_rank.items():
+        user_data.append({"user_id": user_id, "score": score, "article_ids": get_liked_items(user_id)})
+
+    user_data = sorted(user_data, key=lambda x: x["score"], reverse=True)
+
+    max_score = max(entry["score"] for entry in user_data)
+    for user in user_data:
+        user["normalized_score"] = user["score"] / max_score
+
+    article_scores = {article_id: 0.0 for article_id in articles["article_id"]}
+    for user in user_data:
+        for article_id in user["article_ids"]:
+            article_scores[article_id] = max(article_scores[article_id], user["normalized_score"])
+
+    articles["collaborative_score"] = articles["article_id"].map(article_scores)
+
+    return articles.sort_values(by="collaborative_score", ascending=False).head(n)
 
 
 for _, row in content_based_filtering(user_id="DUMMY", n=100).iterrows():
