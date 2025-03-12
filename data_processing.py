@@ -116,8 +116,9 @@ def cosine_similarity(vec1, vec2):
 
 
 def get_liked_items(user):
+    # Returns a list of ids representing the items the given user has liked
     # TODO stub - implement correctly using user-item-matrix M
-    return most_popular(10)
+    return most_popular(10)["article_id"].tolist()
 
 
 # => Loading articles time (len 20738): 1177.0574 seconds (without embeddings pre-computed)
@@ -127,7 +128,7 @@ def get_liked_items(user):
 def content_based_filtering(user_id="DUMMY_USER_ID", n=5):
     articles = get_preprocessed_articles()
 
-    liked_articles = get_liked_items(user_id)
+    liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
 
     # compute mean cosine similarity between all articles and liked_articles
     articles["mean_similarity"] = articles["embedding"].apply(
