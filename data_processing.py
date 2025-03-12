@@ -132,7 +132,7 @@ def get_users_who_liked(item):
 # => Loading articles time (len 20738): 0.5313 seconds (with precomputed embeddings, just loading from disk)
 
 
-def content_based_filtering(user_id="DUMMY_USER_ID", n=5):
+def content_based_filtering(user_id="DUMMY_USER_ID"):
     articles = get_preprocessed_articles()
 
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
@@ -142,10 +142,10 @@ def content_based_filtering(user_id="DUMMY_USER_ID", n=5):
         lambda x: np.mean([cosine_similarity(x, y) for y in liked_articles["embedding"]])
     )
 
-    return articles.sort_values(by="contentbased_score", ascending=False).head(n)
+    return articles.sort_values(by="contentbased_score", ascending=False)
 
 
-def collaborative_filtering(user_id="DUMMY_USER_ID", n=5):
+def collaborative_filtering(user_id="DUMMY_USER_ID"):
     articles = get_preprocessed_articles()
 
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
@@ -181,8 +181,11 @@ def collaborative_filtering(user_id="DUMMY_USER_ID", n=5):
 
     articles["collaborative_score"] = articles["article_id"].map(article_scores)
 
-    return articles.sort_values(by="collaborative_score", ascending=False).head(n)
+    return articles.sort_values(by="collaborative_score", ascending=False)
 
 
-for _, row in content_based_filtering(user_id="DUMMY", n=100).iterrows():
-    print(f"ID: {row['article_id']}, Title: {row['title']}, Similarity: {row['mean_similarity']:.4f}")
+# for _, row in content_based_filtering(user_id="DUMMY").head(100).iterrows():
+#     print(f"ID: {row['article_id']}, Title: {row['title']}, content-based: {row['contentbased_score']:.4f}")
+
+# for _, row in collaborative_filtering(user_id="DUMMY").head(100).iterrows():
+#     print(f"ID: {row['article_id']}, Title: {row['title']}, collaborative: {row['collaborative_score']:.4f}")
