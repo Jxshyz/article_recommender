@@ -80,46 +80,10 @@ pd.set_option("display.max_columns", None)
 pd.set_option("display.max_colwidth", None)
 
 
-def print_dataframe(df, cols=["article_id", "title", "published_time", "total_pageviews", "total_read_time"]):
-    print(df[cols])
-
-
-def most_popular(n=5, date=None, max_age=timedelta(days=7)):
-    """
-    Baseline recommender. Suggests the most popular articles, based on 'total_pageviews'.
-
-    Args:
-        n (int, optional): Amount of returned articles. Defaults to 5.
-        date (str, optional): Date of recommendation. Format is YYYY-MM-DD. Defaults to None.
-        max_age (timedelta, optional): Maximum age of recommended articles. Defaults to timedelta(days=7).
-
-    Returns:
-        pd.DataFrame: A DataFrame containing most popular articles
-    """
-
-    filtered_articles = get_preprocessed_articles()
-
-    if date:
-        date = pd.to_datetime(date)
-        filtered_articles = filtered_articles[
-            (filtered_articles["published_time"] >= date - max_age) & (filtered_articles["published_time"] <= date)
-        ]
-
-    return filtered_articles.sort_values(by="total_pageviews", ascending=False).head(n)
-
-
-# print_dataframe(most_popular(5, "2023-04-17"))
-# print_dataframe(most_popular(1))
-
-
-def cosine_similarity(vec1, vec2):
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-
-
 def get_liked_items(user):
     # Returns a list of ids representing the items the given user has liked
     # TODO stub - implement correctly using user-item-matrix M
-    return most_popular(10)["article_id"].tolist()
+    return baseline_filtering().head(10)["article_id"].tolist()
 
 
 def get_users_who_liked(item):
@@ -128,8 +92,28 @@ def get_users_who_liked(item):
     return [1, 2, 3]
 
 
-# => Loading articles time (len 20738): 1177.0574 seconds (without embeddings pre-computed)
-# => Loading articles time (len 20738): 0.5313 seconds (with precomputed embeddings, just loading from disk)
+def cosine_similarity(vec1, vec2):
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+
+
+def baseline_filtering(date=None, max_age=timedelta(days=7)):
+    articles = get_preprocessed_articles()
+
+    max_pageviews = articles["total_pageviews"].max()
+    articles["baseline_score"] = articles["total_pageviews"] / max_pageviews
+
+    if date is not None:
+        date = pd.to_datetime(date)
+        end_date = date
+        start_date = date - max_age
+
+        articles["baseline_score"] = np.where(
+            (articles["published_time"] >= start_date) & (articles["published_time"] <= end_date),
+            articles["baseline_score"],
+            0.0,
+        )
+
+    return articles.sort_values(by="baseline_score", ascending=False)
 
 
 def content_based_filtering(user_id="DUMMY_USER_ID"):
@@ -183,6 +167,9 @@ def collaborative_filtering(user_id="DUMMY_USER_ID"):
 
     return articles.sort_values(by="collaborative_score", ascending=False)
 
+
+# for _, row in baseline_filtering().head(100).iterrows():
+#     print(f"ID: {row['article_id']}, Title: {row['title']}, baseline: {row['baseline_score']:.4f}")
 
 # for _, row in content_based_filtering(user_id="DUMMY").head(100).iterrows():
 #     print(f"ID: {row['article_id']}, Title: {row['title']}, content-based: {row['contentbased_score']:.4f}")
