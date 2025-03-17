@@ -1,12 +1,12 @@
 import numpy as np
 #from sklearn.metrics import recall_score
 
-def evaluate_recommendation(predictions, ground_truth):
+def evaluate_recall(predictions, ground_truth):
     """
-    Evaluate recall for a recommendation system.
+    Evaluate recall for a news recommendation system.
     
     Parameters:
-    - predictions: List of sets of recommended items (e.g., from different filterers)
+    - predictions: List of sets of recommended items (from the three filters)
     - ground_truth: List of sets of actual clicked items
     
     Returns:
@@ -14,9 +14,16 @@ def evaluate_recommendation(predictions, ground_truth):
     """
     recall_scores = []
     for pred in predictions:
-        true_positives = sum([1 for user in range(len(ground_truth)) if len(pred[user] & ground_truth[user]) > 0])
-        false_negatives = sum([1 for user in range(len(ground_truth)) if len(pred[user] & ground_truth[user]) == 0])
-        recall = true_positives / (true_positives + false_negatives) if true_positives + false_negatives > 0 else 0
+        true_positives = 0
+        false_negatives = 0
+        for user, true_articles in ground_truth.items():
+            if user in pred:
+                recommended_articles = pred[user]
+                true_positives += len(recommended_articles & true_articles)
+                false_negatives += len(true_articles - recommended_articles)
+            else:
+                false_negatives += len(true_articles)
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
         recall_scores.append(recall)
     
     return recall_scores
@@ -62,16 +69,31 @@ def split_data_sliding_window(interactions, window_size, step_size):
 
 
 # Example Input
-# Predictions from the three recommenders
-most_popular_preds = [{1, 3, 5}, {2, 4, 6}, {1, 2, 3}]
-content_based_preds = [{1, 2}, {2, 5, 6}, {4, 5}]
-collaborative_preds = [{3, 4, 5}, {1, 2, 3}, {5, 6}]
+most_popular_preds = {
+    1: {101, 103, 105},
+    2: {202, 204, 206},
+    3: {301, 302, 303}
+}
+content_based_preds = {
+    1: {101, 102},
+    2: {204, 205, 206},
+    3: {304, 305}
+}
+collaborative_preds = {
+    1: {103, 104, 105},
+    2: {201, 202, 203},
+    3: {305, 306}
+}
 
-# Ground truth from user interactions
-ground_truth = [{1, 5}, {2, 6}, {4, 5}]
+# Ground truth (user interactions)
+ground_truth = {
+    1: {101, 105},
+    2: {202, 206},
+    3: {304, 305}
+}
 
 # Evaluate Recall
-recalls = evaluate_recommendation(
+recalls = evaluate_recall(
     [most_popular_preds, content_based_preds, collaborative_preds],
     ground_truth
 )
