@@ -224,7 +224,7 @@ def create_sparse(
     liked_articles = user_item_matrix[user_idx].nonzero()[1]
     print(f"Articles liked by user {all_users[0]}: {[all_articles[idx] for idx in liked_articles]}")
 
-    return user_item_matrix, user_to_idx, article_to_idx
+    return user_item_matrix, user_to_idx, article_to_idx, all_users, all_articles
 
 
 def Sparse_exploration(npz_file_path, data_folder):

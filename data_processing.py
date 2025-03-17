@@ -74,22 +74,63 @@ def get_preprocessed_articles():
     return pd.read_parquet(preprocessed_path)
 
 
+import pickle
+from scipy.sparse import load_npz, save_npz, csr_matrix
+import sparse_matrix as sparse
+import data_loader
+
+
+def get_preprocessed_user_item_matrix():
+    output_dir = "data/preprocessed"
+    matrix_file = os.path.join(output_dir, "user_item_matrix.npz")
+    mappings_file = os.path.join(output_dir, "mappings.pkl")
+
+    if not os.path.exists(matrix_file) or not os.path.exists(mappings_file):
+        print(f"Preprocessing user-item-matrix. This might take some time. Saving into '{matrix_file}'.")
+
+        Articles, Bhv_test, Hstr_test, Bhv_val, Hstr_val = data_loader.load()
+        user_item_matrix, user_to_idx, article_to_idx, all_users, all_articles = sparse.create_sparse(
+            "data", Articles, Bhv_test, Hstr_test, Bhv_val, Hstr_val, matrix_file
+        )
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        save_npz(matrix_file, user_item_matrix)
+        with open(mappings_file, "wb") as f:
+            pickle.dump((user_to_idx, article_to_idx, all_users, all_articles), f)
+
+    user_item_matrix = load_npz(matrix_file)
+    with open(mappings_file, "rb") as f:
+        user_to_idx, article_to_idx, all_users, all_articles = pickle.load(f)
+    return user_item_matrix, user_to_idx, article_to_idx, all_users, all_articles
+
+
 # setup
 pd.set_option("display.max_rows", None)
 pd.set_option("display.max_columns", None)
 pd.set_option("display.max_colwidth", None)
 
-
-def get_liked_items(user):
-    # Returns a list of ids representing the items the given user has liked
-    # TODO stub - implement correctly using user-item-matrix M
-    return baseline_filtering(get_preprocessed_articles()).head(10)["article_id"].tolist()
+user_item_matrix, user_to_idx, article_to_idx, all_users, all_articles = get_preprocessed_user_item_matrix()
 
 
-def get_users_who_liked(item):
-    # Returns a list of ids representing the users that have liked the given item
-    # TODO stub - implement correctly using user-item-matrix M
-    return [1, 2, 3]
+def get_liked_items(user_id):
+    """Returns a list of article IDs liked by the given user."""
+    if user_id not in user_to_idx:
+        return []
+
+    user_idx = user_to_idx[user_id]  # convert user_id to matrix index
+    liked_articles = user_item_matrix[user_idx].nonzero()[1]  # Get article matrix indices
+    return [all_articles[idx] for idx in liked_articles]  # Convert back to article_id
+
+
+def get_users_who_liked(article_id):
+    """Returns a list of user IDs who liked the given article."""
+    if article_id not in article_to_idx:
+        return []
+
+    article_idx = article_to_idx[article_id]  # convert article_id to matrix index
+    liked_users = user_item_matrix[:, article_idx].nonzero()[0]  # Get user matrix indices
+    return [all_users[idx] for idx in liked_users]  # Convert back to user_id
 
 
 def cosine_similarity(vec1, vec2):
@@ -114,7 +155,7 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
     return articles.sort_values(by="baseline_score", ascending=False)
 
 
-def content_based_filtering(articles, user_id="DUMMY_USER_ID"):
+def content_based_filtering(articles, user_id):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
 
     # compute mean cosine similarity between all articles and liked_articles
@@ -125,7 +166,7 @@ def content_based_filtering(articles, user_id="DUMMY_USER_ID"):
     return articles.sort_values(by="contentbased_score", ascending=False)
 
 
-def collaborative_filtering(articles, user_id="DUMMY_USER_ID"):
+def collaborative_filtering(articles, user_id):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
     similar_liked_articles = set()
 
@@ -178,8 +219,8 @@ def hybrid_filtering(articles):
 
 articles = get_preprocessed_articles()
 articles = baseline_filtering(articles=articles)
-articles = content_based_filtering(articles=articles, user_id="DUMMY")
-articles = collaborative_filtering(articles=articles, user_id="DUMMY")
+articles = content_based_filtering(articles=articles, user_id=151570)  # randomly picked user id
+articles = collaborative_filtering(articles=articles, user_id=151570)  # randomly picked user id
 articles = hybrid_filtering(articles=articles)
 
 for _, row in articles.head(100).iterrows():
