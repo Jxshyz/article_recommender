@@ -5,6 +5,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import gdown
 
+import time
+
 
 def get_parquets():
     # Google Drive folder ID
@@ -74,6 +76,10 @@ def get_preprocessed_articles():
     return pd.read_parquet(preprocessed_path)
 
 
+start = time.time()
+articles = get_preprocessed_articles()
+print(f"Preprocessing: {time.time() - start}")
+
 import pickle
 from scipy.sparse import load_npz, save_npz, csr_matrix
 import sparse_matrix as sparse
@@ -133,8 +139,41 @@ def get_users_who_liked(article_id):
     return [all_users[idx] for idx in liked_users]  # Convert back to user_id
 
 
-def cosine_similarity(vec1, vec2):
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+def get_preprocessed_similarities(articles):
+    matrix_file = "data/preprocessed/similarity_matrix.pkl"
+
+    if not os.path.exists(matrix_file):
+        print(f"Preprocessing cosine similarity matrix. This might take some time. Saving into '{matrix_file}'.")
+
+        embeddings = np.vstack(articles["embedding"].values)
+        ids = articles["article_id"].values
+
+        similarity_matrix = cosine_similarity(embeddings)
+        id_to_index = {article_id: idx for idx, article_id in enumerate(articles["article_id"])}
+
+        os.makedirs(os.path.dirname(matrix_file), exist_ok=True)
+
+        with open(matrix_file, "wb") as f:
+            pickle.dump((similarity_matrix, id_to_index), f)
+
+    with open(matrix_file, "rb") as f:
+        similarity_matrix, id_to_index = pickle.load(f)
+
+    return similarity_matrix, id_to_index
+
+
+start = time.time()
+similarity_matrix, id_to_index = get_preprocessed_similarities(articles)
+print(f"sim matrix: {time.time() - start}")
+
+
+def get_similarity(id1, id2):
+    if id1 not in id_to_index or id2 not in id_to_index:
+        return None
+    return similarity_matrix[id_to_index[id1], id_to_index[id2]]
 
 
 def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
@@ -159,8 +198,8 @@ def content_based_filtering(articles, user_id):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
 
     # compute mean cosine similarity between all articles and liked_articles
-    articles["contentbased_score"] = articles["embedding"].apply(
-        lambda x: np.mean([cosine_similarity(x, y) for y in liked_articles["embedding"]])
+    articles["contentbased_score"] = articles["article_id"].apply(
+        lambda x: np.mean([get_similarity(x, y) for y in liked_articles["article_id"]])
     )
 
     return articles.sort_values(by="contentbased_score", ascending=False)
@@ -171,8 +210,8 @@ def collaborative_filtering(articles, user_id):
     similar_liked_articles = set()
 
     for _, liked_article in liked_articles.iterrows():
-        articles["collaborative_cossim"] = articles["embedding"].apply(
-            lambda article: cosine_similarity(liked_article["embedding"], article)
+        articles["collaborative_cossim"] = articles["article_id"].apply(
+            lambda article: get_similarity(liked_article["article_id"], article)
         )
         similar_liked_articles.update(articles.nlargest(5, "collaborative_cossim")["article_id"].tolist())
 
@@ -217,13 +256,27 @@ def hybrid_filtering(articles):
     return articles.sort_values(by="hybrid_score", ascending=False)
 
 
-articles = get_preprocessed_articles()
+start = time.time()
 articles = baseline_filtering(articles=articles)
+print(f"Baseline: {time.time() - start}")
+start = time.time()
 articles = content_based_filtering(articles=articles, user_id=151570)  # randomly picked user id
+print(f"Content-Based: {time.time() - start}")
+start = time.time()
 articles = collaborative_filtering(articles=articles, user_id=151570)  # randomly picked user id
+print(f"Collaborative: {time.time() - start}")
+start = time.time()
 articles = hybrid_filtering(articles=articles)
+print(f"Hybrid: {time.time() - start}")
 
-for _, row in articles.head(100).iterrows():
+for _, row in articles.head(10).iterrows():
+    print(
+        f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
+    )
+
+print(f"\n\n\n\n\nLAST 100:\n")
+
+for _, row in articles.tail(10).iterrows():
     print(
         f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
     )
