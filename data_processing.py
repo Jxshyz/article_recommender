@@ -197,10 +197,9 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
 def content_based_filtering(articles, user_id):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
 
-    # compute mean cosine similarity between all articles and liked_articles
-    articles["contentbased_score"] = articles["article_id"].apply(
-        lambda x: np.mean([get_similarity(x, y) for y in liked_articles["article_id"]])
-    )
+    liked_indices = np.array([articleid_to_index[article_id] for article_id in liked_articles["article_id"]])
+    similarity_scores = similarity_matrix[:, liked_indices]  # Shape: (num_articles, num_liked_articles)
+    articles["contentbased_score"] = similarity_scores.mean(axis=1)
 
     return articles.sort_values(by="contentbased_score", ascending=False)
 
@@ -263,7 +262,7 @@ for _, row in articles.head(10).iterrows():
         f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
     )
 
-print(f"\n\n\n\n\nLAST 100:\n")
+print(f"\n\n\n\n\nLAST 10:\n")
 
 for _, row in articles.tail(10).iterrows():
     print(
