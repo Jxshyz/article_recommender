@@ -192,43 +192,43 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
 
 def content_based_filtering(articles, user_id):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
+    liked_idxs = np.array([articleid_to_index[article_id] for article_id in liked_articles["article_id"]])
 
-    liked_indices = np.array([articleid_to_index[article_id] for article_id in liked_articles["article_id"]])
-    similarity_scores = similarity_matrix[:, liked_indices]  # Shape: (num_articles, num_liked_articles)
-    articles["contentbased_score"] = similarity_scores.mean(axis=1)
+    # final score of an item is the mean of all cosine similarities between this item and all liked items
+    similarity_scores = similarity_matrix[:, liked_idxs]  # Shape: (num_articles, num_liked_articles)
+    articles["contentbased_score"] = similarity_scores.mean(axis=1)  # Shape: (num_articles,)
 
     return articles.sort_values(by="contentbased_score", ascending=False)
 
 
 def collaborative_filtering(articles, user_id):
     liked_article_ids = get_liked_items(user_id)
-
     liked_indices = np.array([articleid_to_index[article_id] for article_id in liked_article_ids])
+
+    # find all items that are similar to the liked items
     similarity_scores = similarity_matrix[liked_indices]  # Shape: (num_liked_articles, num_articles)
     top_similar_indices = np.argsort(similarity_scores, axis=1)[:, -5:][:, ::-1]  # Shape: (num_liked_articles, 5)
-    similar_liked_articles = set(all_articleids[top_similar_indices].flatten())
-
+    similar_liked_articles = set(all_articleids[top_similar_indices].flatten())  # Shape: (<= num_liked_articles * 5,)
+    # find all users who liked the similar items
     similar_articles_idx = [
         article_to_idx[article_id] for article_id in similar_liked_articles if article_id in article_to_idx
     ]
     same_likes = [all_users[idx] for idx in user_item_matrix[:, similar_articles_idx].nonzero()[0]]
 
+    # count how many times each user liked a similar item
     user_rank = Counter(same_likes)
-
     user_ids = np.array(list(user_rank.keys()))
-    scores = np.array(list(user_rank.values()))
-    max_score = scores.max() if scores.size > 0 else 1
-    scores = scores / max_score  # normalize scores
-
-    article_scores = defaultdict(float)
-
     user_idxs = [user_to_idx.get(user_id) for user_id in user_ids]
+    scores = np.array(list(user_rank.values()))
+    scores = scores / scores.max() if scores.size > 0 else scores  # normalize scores
+
+    # final score of an item is the maximum normalized score of all users who liked it
+    article_scores = defaultdict(float)
     for uidx, score in zip(user_idxs, scores):
         # below is the most time-consuming LOC. However, it cannot be batched due to the necessary call to nonzero
         liked_articles = all_articles[user_item_matrix[uidx].nonzero()[1]]
         for article_id in liked_articles:
             article_scores[article_id] = max(article_scores.get(article_id, 0), score)
-
     articles["collaborative_score"] = articles["article_id"].map(article_scores).fillna(0)
 
     return articles.sort_values(by="collaborative_score", ascending=False)
@@ -237,6 +237,7 @@ def collaborative_filtering(articles, user_id):
 def hybrid_filtering(articles):
     weights = {"baseline_score": 0.5, "contentbased_score": 0.25, "collaborative_score": 0.25}
 
+    # final score is the weighted sum of the other scores
     articles["hybrid_score"] = (
         articles["baseline_score"] * weights["baseline_score"]
         + articles["contentbased_score"] * weights["contentbased_score"]
