@@ -1,48 +1,53 @@
 import os
-import numpy as np
-from collections import defaultdict, Counter
-import pandas as pd
+import time
 from datetime import datetime, timedelta
 import gdown
+import pickle
+import numpy as np
+import pandas as pd
+from collections import defaultdict, Counter
+from scipy.sparse import load_npz, save_npz, csr_matrix
+from sklearn.metrics.pairwise import cosine_similarity
 
-import time
+import sparse_matrix as sparse
+import data_loader
+
+data_folder = "data"
+preprocessed_folder = os.path.join(data_folder, "preprocessed")
 
 
 def get_parquets():
     # Google Drive folder ID
     folder_id = "1kGBWTm-a1alJh_1pFu9K-3hYcYkNPO-g"
+    download_folder = os.path.join(data_folder, "ebnerd")
 
-    # Define folder name for the download
-    data_folder = "data"
-
-    if not os.path.exists(data_folder):
-        print(f"Downloading into '{data_folder}' from Google Drive...")
-        gdown.download_folder(f"https://drive.google.com/drive/folders/{folder_id}", quiet=False, output=data_folder)
-
-    else:
-        print(f"Folder '{data_folder}' already exists. Skipping download.")
+    if not os.path.exists(download_folder):
+        # See https://recsys.eb.dk/dataset/ for description of the dataset
+        print(f"Downloading from Google Drive. This might take some time. Saving into '{download_folder}'.")
+        gdown.download_folder(
+            f"https://drive.google.com/drive/folders/{folder_id}", quiet=False, output=download_folder
+        )
 
     return {
-        "articles": data_folder + "\\articles.parquet",
-        "behaviour_train": data_folder + "\\train\\behaviors.parquet",
-        "history_train": data_folder + "\\train\\history.parquet",
-        "behaviour_validation": data_folder + "\\validation\\behaviors.parquet",
-        "history_validation": data_folder + "\\validation\\history.parquet",
+        "articles": os.path.join(download_folder, "articles.parquet"),
+        "behaviour_train": os.path.join(download_folder, "train/behaviors.parquet"),
+        "history_train": os.path.join(download_folder, "train/history.parquet"),
+        "behaviour_validation": os.path.join(download_folder, "validation/behaviors.parquet"),
+        "history_validation": os.path.join(download_folder, "validation/history.parquet"),
     }
 
 
 def get_preprocessed_articles():
-    preprocessed_path = "data/preprocessed/articles_cs.parquet"
-    if not os.path.exists(preprocessed_path):
-        print(f"Preprocessing articles. This might take some time. Saving into '{preprocessed_path}'.")
-        files = get_parquets()
-        # See https://recsys.eb.dk/dataset/ for description of the dataset
-        articles = pd.read_parquet(files["articles"])
-        # behaviour_train = pd.read_parquet(files["behaviour_train"])
-        # history_train = pd.read_parquet(files["history_train"])
-        # behaviour_validation = pd.read_parquet(files["behaviour_validation"])
-        # history_validation = pd.read_parquet(files["history_validation"])
+    articles_file = os.path.join(preprocessed_folder, "articles_cs.parquet")
 
+    if not os.path.exists(articles_file):
+        print(f"Preprocessing articles. This might take some time. Saving into '{articles_file}'.")
+
+        # load articles
+        files = get_parquets()
+        articles = pd.read_parquet(files["articles"])
+
+        # clean up dataset
         articles["title"] = articles["title"].fillna("").astype(str)
         articles["subtitle"] = articles["subtitle"].fillna("").astype(str)
         articles["category_str"] = articles["category_str"].fillna("").astype(str)
@@ -50,11 +55,11 @@ def get_preprocessed_articles():
         articles["total_pageviews"] = articles["total_pageviews"].fillna(0)
         articles["published_time"] = pd.to_datetime(articles["published_time"])
 
+        # compute embedding for every article
         articles["aggregated_text"] = articles[["title", "subtitle", "category_str", "body"]].apply(
             lambda x: f"TITLE: {x['title']}\n\n\nSUBTITLE: {x['subtitle']}\n\n\nCATEGORY: {x['category_str']}\n\n\nCONTENT: {x['body']}",
             axis=1,
         )
-
         from sentence_transformers import SentenceTransformer
 
         model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
@@ -67,37 +72,33 @@ def get_preprocessed_articles():
             return np.array(embeddings)
 
         articles["embedding"] = list(batch_embed(articles["aggregated_text"].tolist()))
-
         articles.drop(columns=["aggregated_text"], inplace=True)
 
-        os.makedirs(os.path.dirname(preprocessed_path), exist_ok=True)
-        articles.to_parquet(preprocessed_path)
+        # save preprocessed articles
+        os.makedirs(os.path.dirname(articles_file), exist_ok=True)
+        articles.to_parquet(articles_file)
 
-    return pd.read_parquet(preprocessed_path)
+    return pd.read_parquet(articles_file)
 
 
 articles = get_preprocessed_articles()
 
-import pickle
-from scipy.sparse import load_npz, save_npz, csr_matrix
-import sparse_matrix as sparse
-import data_loader
-
 
 def get_preprocessed_user_item_matrix():
-    output_dir = "data/preprocessed"
-    matrix_file = os.path.join(output_dir, "user_item_matrix.npz")
-    mappings_file = os.path.join(output_dir, "mappings.pkl")
+    matrix_file = os.path.join(preprocessed_folder, "user_item_matrix.npz")
+    mappings_file = os.path.join(preprocessed_folder, "uim_mappings.pkl")
 
     if not os.path.exists(matrix_file) or not os.path.exists(mappings_file):
         print(f"Preprocessing user-item-matrix. This might take some time. Saving into '{matrix_file}'.")
 
-        Articles, Bhv_test, Hstr_test, Bhv_val, Hstr_val = data_loader.load()
+        Articles, behaviour_test, history_test, behaviour_value, history_value = data_loader.load()
+
+        # compute user-item-matrix and save mappings from / to matrix index
         user_item_matrix, uim_u2i, uim_a2i, uim_i2u, uim_i2a = sparse.create_sparse(
-            "data", Articles, Bhv_test, Hstr_test, Bhv_val, Hstr_val, matrix_file
+            "data", Articles, behaviour_test, history_test, behaviour_value, history_value, matrix_file
         )
 
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(preprocessed_folder, exist_ok=True)
 
         save_npz(matrix_file, user_item_matrix)
         with open(mappings_file, "wb") as f:
@@ -123,8 +124,8 @@ def get_liked_items(user_id):
         return []
 
     user_idx = uim_u2i[user_id]  # convert user_id to matrix index
-    liked_articles = user_item_matrix[user_idx].nonzero()[1]  # Get article matrix indices
-    return [uim_i2a[idx] for idx in liked_articles]  # Convert back to article_id
+    liked_article_idxs = user_item_matrix[user_idx].nonzero()[1]  # Get indices of articles liked by the user
+    return [uim_i2a[idx] for idx in liked_article_idxs]  # Convert indices back to article_id
 
 
 def get_users_who_liked(article_id):
@@ -133,22 +134,20 @@ def get_users_who_liked(article_id):
         return []
 
     article_idx = uim_a2i[article_id]  # convert article_id to matrix index
-    liked_users = user_item_matrix[:, article_idx].nonzero()[0]  # Get user matrix indices
-    return [uim_i2u[idx] for idx in liked_users]  # Convert back to user_id
-
-
-from sklearn.metrics.pairwise import cosine_similarity
+    user_idxs_who_liked = user_item_matrix[:, article_idx].nonzero()[0]  # Get indices of users who liked the article
+    return [uim_i2u[idx] for idx in user_idxs_who_liked]  # Convert indices back to user_id
 
 
 def get_preprocessed_similarities():
-    matrix_file = "data/preprocessed/similarity_matrix.pkl"
+    matrix_file = os.path.join(preprocessed_folder, "similarity_matrix.pkl")
 
     if not os.path.exists(matrix_file):
         print(f"Preprocessing cosine similarity matrix. This might take some time. Saving into '{matrix_file}'.")
 
         embeddings = np.vstack(articles["embedding"].values)
-        sm_i2a = articles["article_id"].values
 
+        # compute pairwise cosine similarities and save mappings from / to matrix index
+        sm_i2a = articles["article_id"].values
         similarity_matrix = cosine_similarity(embeddings)
         sm_a2i = {article_id: idx for idx, article_id in enumerate(sm_i2a)}
 
@@ -166,10 +165,10 @@ def get_preprocessed_similarities():
 similarity_matrix, sm_a2i, sm_i2a = get_preprocessed_similarities()
 
 
-def get_similarity(id1, id2):
-    if id1 not in sm_a2i or id2 not in sm_a2i:
+def get_similarity(article_id1, article_id2):
+    if article_id1 not in sm_a2i or article_id2 not in sm_a2i:
         return None
-    return similarity_matrix[sm_a2i[id1], sm_a2i[id2]]
+    return similarity_matrix[sm_a2i[article_id1], sm_a2i[article_id2]]
 
 
 def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
@@ -191,8 +190,7 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
 
 
 def content_based_filtering(articles, user_id):
-    liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
-    liked_idxs = np.array([sm_a2i[article_id] for article_id in liked_articles["article_id"]])
+    liked_idxs = np.array([sm_a2i[article_id] for article_id in get_liked_items(user_id)])
 
     # final score of an item is the mean of all cosine similarities between this item and all liked items
     similarity_scores = similarity_matrix[:, liked_idxs]  # Shape: (num_articles, num_liked_articles)
@@ -202,19 +200,18 @@ def content_based_filtering(articles, user_id):
 
 
 def collaborative_filtering(articles, user_id):
-    liked_article_ids = get_liked_items(user_id)
-    liked_indices = np.array([sm_a2i[article_id] for article_id in liked_article_ids])
+    liked_idxs = np.array([sm_a2i[article_id] for article_id in get_liked_items(user_id)])
 
     # find all items that are similar to the liked items
-    similarity_scores = similarity_matrix[liked_indices]  # Shape: (num_liked_articles, num_articles)
-    top_similar_indices = np.argsort(similarity_scores, axis=1)[:, -5:][:, ::-1]  # Shape: (num_liked_articles, 5)
-    similar_liked_articles = set(sm_i2a[top_similar_indices].flatten())  # Shape: (<= num_liked_articles * 5,)
+    similarity_scores = similarity_matrix[liked_idxs]  # Shape: (num_liked_articles, num_articles)
+    top_similar_idxs = np.argsort(similarity_scores, axis=1)[:, -5:][:, ::-1]  # Shape: (num_liked_articles, 5)
+    similar_article_ids = set(sm_i2a[top_similar_idxs].flatten())  # Shape: (<= num_liked_articles * 5,)
     # find all users who liked the similar items
-    similar_articles_idx = [uim_a2i[article_id] for article_id in similar_liked_articles if article_id in uim_a2i]
-    same_likes = [uim_i2u[idx] for idx in user_item_matrix[:, similar_articles_idx].nonzero()[0]]
+    similar_article_idxs = [uim_a2i[article_id] for article_id in similar_article_ids if article_id in uim_a2i]
+    similar_user_ids = [uim_i2u[idx] for idx in user_item_matrix[:, similar_article_idxs].nonzero()[0]]
 
     # count how many times each user liked a similar item
-    user_rank = Counter(same_likes)
+    user_rank = Counter(similar_user_ids)
     user_ids = np.array(list(user_rank.keys()))
     user_idxs = [uim_u2i.get(user_id) for user_id in user_ids]
     scores = np.array(list(user_rank.values()))
@@ -222,10 +219,10 @@ def collaborative_filtering(articles, user_id):
 
     # final score of an item is the maximum normalized score of all users who liked it
     article_scores = defaultdict(float)
-    for uidx, score in zip(user_idxs, scores):
+    for user_idx, score in zip(user_idxs, scores):
         # below is the most time-consuming LOC. However, it cannot be batched due to the necessary call to nonzero
-        liked_articles = uim_i2a[user_item_matrix[uidx].nonzero()[1]]
-        for article_id in liked_articles:
+        liked_article_ids = uim_i2a[user_item_matrix[user_idx].nonzero()[1]]
+        for article_id in liked_article_ids:
             article_scores[article_id] = max(article_scores.get(article_id, 0), score)
     articles["collaborative_score"] = articles["article_id"].map(article_scores).fillna(0)
 
@@ -250,10 +247,10 @@ start = time.time()
 articles = baseline_filtering(articles=articles)
 print(f"Baseline:      {time.time() - start:4f}")
 start = time.time()
-articles = content_based_filtering(articles=articles, user_id=151570)  # randomly picked user id
+articles = content_based_filtering(articles=articles, user_id=151570)  # randomly picked user_id
 print(f"Content-Based: {time.time() - start:4f}")
 start = time.time()
-articles = collaborative_filtering(articles=articles, user_id=151570)  # randomly picked user id
+articles = collaborative_filtering(articles=articles, user_id=151570)  # randomly picked user_id
 print(f"Collaborative: {time.time() - start:4f}")
 start = time.time()
 articles = hybrid_filtering(articles=articles)
