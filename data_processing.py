@@ -76,9 +76,7 @@ def get_preprocessed_articles():
     return pd.read_parquet(preprocessed_path)
 
 
-start = time.time()
 articles = get_preprocessed_articles()
-print(f"Preprocessing: {time.time() - start}")
 
 import pickle
 from scipy.sparse import load_npz, save_npz, csr_matrix
@@ -165,9 +163,7 @@ def get_preprocessed_similarities():
     return similarity_matrix, articleid_to_index, all_articleids
 
 
-start = time.time()
 similarity_matrix, articleid_to_index, all_articleids = get_preprocessed_similarities()
-print(f"sim matrix: {time.time() - start}")
 
 
 def get_similarity(id1, id2):
@@ -212,20 +208,26 @@ def collaborative_filtering(articles, user_id):
     top_similar_indices = np.argsort(similarity_scores, axis=1)[:, -5:][:, ::-1]  # Shape: (num_liked_articles, 5)
     similar_liked_articles = set(all_articleids[top_similar_indices].flatten())
 
-    same_likes = [user for article_id in similar_liked_articles for user in get_users_who_liked(article_id)]
+    similar_articles_idx = [
+        article_to_idx[article_id] for article_id in similar_liked_articles if article_id in article_to_idx
+    ]
+    same_likes = [all_users[idx] for idx in user_item_matrix[:, similar_articles_idx].nonzero()[0]]
+
     user_rank = Counter(same_likes)
 
-    user_data = [
-        {"user_id": uid, "score": score, "article_ids": get_liked_items(uid)} for uid, score in user_rank.items()
-    ]
-    max_score = max(user_rank.values(), default=1)
-    for user in user_data:
-        user["normalized_score"] = user["score"] / max_score
+    user_ids = np.array(list(user_rank.keys()))
+    scores = np.array(list(user_rank.values()))
+    max_score = scores.max() if scores.size > 0 else 1
+    scores = scores / max_score  # normalize scores
 
     article_scores = defaultdict(float)
-    for user in user_data:
-        for article_id in user["article_ids"]:
-            article_scores[article_id] = max(article_scores[article_id], user["normalized_score"])
+
+    user_idxs = [user_to_idx.get(user_id) for user_id in user_ids]
+    for uidx, score in zip(user_idxs, scores):
+        # below is the most time-consuming LOC. However, it cannot be batched due to the necessary call to nonzero
+        liked_articles = all_articles[user_item_matrix[uidx].nonzero()[1]]
+        for article_id in liked_articles:
+            article_scores[article_id] = max(article_scores.get(article_id, 0), score)
 
     articles["collaborative_score"] = articles["article_id"].map(article_scores).fillna(0)
 
@@ -244,18 +246,21 @@ def hybrid_filtering(articles):
     return articles.sort_values(by="hybrid_score", ascending=False)
 
 
+total_start = time.time()
 start = time.time()
 articles = baseline_filtering(articles=articles)
-print(f"Baseline: {time.time() - start}")
+print(f"Baseline:      {time.time() - start:4f}")
 start = time.time()
 articles = content_based_filtering(articles=articles, user_id=151570)  # randomly picked user id
-print(f"Content-Based: {time.time() - start}")
+print(f"Content-Based: {time.time() - start:4f}")
 start = time.time()
 articles = collaborative_filtering(articles=articles, user_id=151570)  # randomly picked user id
-print(f"Collaborative: {time.time() - start}")
+print(f"Collaborative: {time.time() - start:4f}")
 start = time.time()
 articles = hybrid_filtering(articles=articles)
-print(f"Hybrid: {time.time() - start}")
+print(f"Hybrid:        {time.time() - start:4f}")
+print()
+print(f"Total:         {time.time() - total_start:4f}")
 
 for _, row in articles.head(10).iterrows():
     print(
