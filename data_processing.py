@@ -93,7 +93,7 @@ def get_preprocessed_user_item_matrix():
         print(f"Preprocessing user-item-matrix. This might take some time. Saving into '{matrix_file}'.")
 
         Articles, Bhv_test, Hstr_test, Bhv_val, Hstr_val = data_loader.load()
-        user_item_matrix, user_to_idx, article_to_idx, all_users, all_articles = sparse.create_sparse(
+        user_item_matrix, uim_u2i, uim_a2i, uim_i2u, uim_i2a = sparse.create_sparse(
             "data", Articles, Bhv_test, Hstr_test, Bhv_val, Hstr_val, matrix_file
         )
 
@@ -101,12 +101,12 @@ def get_preprocessed_user_item_matrix():
 
         save_npz(matrix_file, user_item_matrix)
         with open(mappings_file, "wb") as f:
-            pickle.dump((user_to_idx, article_to_idx, all_users, all_articles), f)
+            pickle.dump((uim_u2i, uim_a2i, uim_i2u, uim_i2a), f)
 
     user_item_matrix = load_npz(matrix_file)
     with open(mappings_file, "rb") as f:
-        user_to_idx, article_to_idx, all_users, all_articles = pickle.load(f)
-    return user_item_matrix, user_to_idx, article_to_idx, all_users, all_articles
+        uim_u2i, uim_a2i, uim_i2u, uim_i2a = pickle.load(f)
+    return user_item_matrix, uim_u2i, uim_a2i, uim_i2u, uim_i2a
 
 
 # setup
@@ -114,27 +114,27 @@ pd.set_option("display.max_rows", None)
 pd.set_option("display.max_columns", None)
 pd.set_option("display.max_colwidth", None)
 
-user_item_matrix, user_to_idx, article_to_idx, all_users, all_articles = get_preprocessed_user_item_matrix()
+user_item_matrix, uim_u2i, uim_a2i, uim_i2u, uim_i2a = get_preprocessed_user_item_matrix()
 
 
 def get_liked_items(user_id):
     """Returns a list of article IDs liked by the given user."""
-    if user_id not in user_to_idx:
+    if user_id not in uim_u2i:
         return []
 
-    user_idx = user_to_idx[user_id]  # convert user_id to matrix index
+    user_idx = uim_u2i[user_id]  # convert user_id to matrix index
     liked_articles = user_item_matrix[user_idx].nonzero()[1]  # Get article matrix indices
-    return [all_articles[idx] for idx in liked_articles]  # Convert back to article_id
+    return [uim_i2a[idx] for idx in liked_articles]  # Convert back to article_id
 
 
 def get_users_who_liked(article_id):
     """Returns a list of user IDs who liked the given article."""
-    if article_id not in article_to_idx:
+    if article_id not in uim_a2i:
         return []
 
-    article_idx = article_to_idx[article_id]  # convert article_id to matrix index
+    article_idx = uim_a2i[article_id]  # convert article_id to matrix index
     liked_users = user_item_matrix[:, article_idx].nonzero()[0]  # Get user matrix indices
-    return [all_users[idx] for idx in liked_users]  # Convert back to user_id
+    return [uim_i2u[idx] for idx in liked_users]  # Convert back to user_id
 
 
 from sklearn.metrics.pairwise import cosine_similarity
@@ -147,29 +147,29 @@ def get_preprocessed_similarities():
         print(f"Preprocessing cosine similarity matrix. This might take some time. Saving into '{matrix_file}'.")
 
         embeddings = np.vstack(articles["embedding"].values)
-        all_articleids = articles["article_id"].values
+        sm_i2a = articles["article_id"].values
 
         similarity_matrix = cosine_similarity(embeddings)
-        articleid_to_index = {article_id: idx for idx, article_id in enumerate(all_articleids)}
+        sm_a2i = {article_id: idx for idx, article_id in enumerate(sm_i2a)}
 
         os.makedirs(os.path.dirname(matrix_file), exist_ok=True)
 
         with open(matrix_file, "wb") as f:
-            pickle.dump((similarity_matrix, articleid_to_index, all_articleids), f)
+            pickle.dump((similarity_matrix, sm_a2i, sm_i2a), f)
 
     with open(matrix_file, "rb") as f:
-        similarity_matrix, articleid_to_index, all_articleids = pickle.load(f)
+        similarity_matrix, sm_a2i, sm_i2a = pickle.load(f)
 
-    return similarity_matrix, articleid_to_index, all_articleids
+    return similarity_matrix, sm_a2i, sm_i2a
 
 
-similarity_matrix, articleid_to_index, all_articleids = get_preprocessed_similarities()
+similarity_matrix, sm_a2i, sm_i2a = get_preprocessed_similarities()
 
 
 def get_similarity(id1, id2):
-    if id1 not in articleid_to_index or id2 not in articleid_to_index:
+    if id1 not in sm_a2i or id2 not in sm_a2i:
         return None
-    return similarity_matrix[articleid_to_index[id1], articleid_to_index[id2]]
+    return similarity_matrix[sm_a2i[id1], sm_a2i[id2]]
 
 
 def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
@@ -192,7 +192,7 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
 
 def content_based_filtering(articles, user_id):
     liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
-    liked_idxs = np.array([articleid_to_index[article_id] for article_id in liked_articles["article_id"]])
+    liked_idxs = np.array([sm_a2i[article_id] for article_id in liked_articles["article_id"]])
 
     # final score of an item is the mean of all cosine similarities between this item and all liked items
     similarity_scores = similarity_matrix[:, liked_idxs]  # Shape: (num_articles, num_liked_articles)
@@ -203,22 +203,20 @@ def content_based_filtering(articles, user_id):
 
 def collaborative_filtering(articles, user_id):
     liked_article_ids = get_liked_items(user_id)
-    liked_indices = np.array([articleid_to_index[article_id] for article_id in liked_article_ids])
+    liked_indices = np.array([sm_a2i[article_id] for article_id in liked_article_ids])
 
     # find all items that are similar to the liked items
     similarity_scores = similarity_matrix[liked_indices]  # Shape: (num_liked_articles, num_articles)
     top_similar_indices = np.argsort(similarity_scores, axis=1)[:, -5:][:, ::-1]  # Shape: (num_liked_articles, 5)
-    similar_liked_articles = set(all_articleids[top_similar_indices].flatten())  # Shape: (<= num_liked_articles * 5,)
+    similar_liked_articles = set(sm_i2a[top_similar_indices].flatten())  # Shape: (<= num_liked_articles * 5,)
     # find all users who liked the similar items
-    similar_articles_idx = [
-        article_to_idx[article_id] for article_id in similar_liked_articles if article_id in article_to_idx
-    ]
-    same_likes = [all_users[idx] for idx in user_item_matrix[:, similar_articles_idx].nonzero()[0]]
+    similar_articles_idx = [uim_a2i[article_id] for article_id in similar_liked_articles if article_id in uim_a2i]
+    same_likes = [uim_i2u[idx] for idx in user_item_matrix[:, similar_articles_idx].nonzero()[0]]
 
     # count how many times each user liked a similar item
     user_rank = Counter(same_likes)
     user_ids = np.array(list(user_rank.keys()))
-    user_idxs = [user_to_idx.get(user_id) for user_id in user_ids]
+    user_idxs = [uim_u2i.get(user_id) for user_id in user_ids]
     scores = np.array(list(user_rank.values()))
     scores = scores / scores.max() if scores.size > 0 else scores  # normalize scores
 
@@ -226,7 +224,7 @@ def collaborative_filtering(articles, user_id):
     article_scores = defaultdict(float)
     for uidx, score in zip(user_idxs, scores):
         # below is the most time-consuming LOC. However, it cannot be batched due to the necessary call to nonzero
-        liked_articles = all_articles[user_item_matrix[uidx].nonzero()[1]]
+        liked_articles = uim_i2a[user_item_matrix[uidx].nonzero()[1]]
         for article_id in liked_articles:
             article_scores[article_id] = max(article_scores.get(article_id, 0), score)
     articles["collaborative_score"] = articles["article_id"].map(article_scores).fillna(0)
@@ -261,15 +259,15 @@ start = time.time()
 articles = hybrid_filtering(articles=articles)
 print(f"Hybrid:        {time.time() - start:4f}")
 print()
-print(f"Total:         {time.time() - total_start:4f}")
+print(f"Total:         {time.time() - total_start:4f}\n")
 
+print(f"\nFIRST 10:")
 for _, row in articles.head(10).iterrows():
     print(
         f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
     )
 
-print(f"\n\n\n\n\nLAST 10:\n")
-
+print(f"\nLAST 10:")
 for _, row in articles.tail(10).iterrows():
     print(
         f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
