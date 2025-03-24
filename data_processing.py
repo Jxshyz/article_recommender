@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from collections import Counter
+from collections import defaultdict, Counter
 import pandas as pd
 from datetime import datetime, timedelta
 import gdown
@@ -142,38 +142,38 @@ def get_users_who_liked(article_id):
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-def get_preprocessed_similarities(articles):
+def get_preprocessed_similarities():
     matrix_file = "data/preprocessed/similarity_matrix.pkl"
 
     if not os.path.exists(matrix_file):
         print(f"Preprocessing cosine similarity matrix. This might take some time. Saving into '{matrix_file}'.")
 
         embeddings = np.vstack(articles["embedding"].values)
-        ids = articles["article_id"].values
+        all_articleids = articles["article_id"].values
 
         similarity_matrix = cosine_similarity(embeddings)
-        id_to_index = {article_id: idx for idx, article_id in enumerate(articles["article_id"])}
+        articleid_to_index = {article_id: idx for idx, article_id in enumerate(all_articleids)}
 
         os.makedirs(os.path.dirname(matrix_file), exist_ok=True)
 
         with open(matrix_file, "wb") as f:
-            pickle.dump((similarity_matrix, id_to_index), f)
+            pickle.dump((similarity_matrix, articleid_to_index, all_articleids), f)
 
     with open(matrix_file, "rb") as f:
-        similarity_matrix, id_to_index = pickle.load(f)
+        similarity_matrix, articleid_to_index, all_articleids = pickle.load(f)
 
-    return similarity_matrix, id_to_index
+    return similarity_matrix, articleid_to_index, all_articleids
 
 
 start = time.time()
-similarity_matrix, id_to_index = get_preprocessed_similarities(articles)
+similarity_matrix, articleid_to_index, all_articleids = get_preprocessed_similarities()
 print(f"sim matrix: {time.time() - start}")
 
 
 def get_similarity(id1, id2):
-    if id1 not in id_to_index or id2 not in id_to_index:
+    if id1 not in articleid_to_index or id2 not in articleid_to_index:
         return None
-    return similarity_matrix[id_to_index[id1], id_to_index[id2]]
+    return similarity_matrix[articleid_to_index[id1], articleid_to_index[id2]]
 
 
 def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
@@ -206,40 +206,29 @@ def content_based_filtering(articles, user_id):
 
 
 def collaborative_filtering(articles, user_id):
-    liked_articles = articles[articles["article_id"].isin(get_liked_items(user_id))]
-    similar_liked_articles = set()
+    liked_article_ids = get_liked_items(user_id)
 
-    for _, liked_article in liked_articles.iterrows():
-        articles["collaborative_cossim"] = articles["article_id"].apply(
-            lambda article: get_similarity(liked_article["article_id"], article)
-        )
-        similar_liked_articles.update(articles.nlargest(5, "collaborative_cossim")["article_id"].tolist())
+    liked_indices = np.array([articleid_to_index[article_id] for article_id in liked_article_ids])
+    similarity_scores = similarity_matrix[liked_indices]  # Shape: (num_liked_articles, num_articles)
+    top_similar_indices = np.argsort(similarity_scores, axis=1)[:, -5:][:, ::-1]  # Shape: (num_liked_articles, 5)
+    similar_liked_articles = set(all_articleids[top_similar_indices].flatten())
 
-    articles.drop(columns=["collaborative_cossim"], inplace=True)
-
-    same_likes = []
-    for article_id in similar_liked_articles:
-        same_likes.extend(get_users_who_liked(article_id))
-
+    same_likes = [user for article_id in similar_liked_articles for user in get_users_who_liked(article_id)]
     user_rank = Counter(same_likes)
 
-    user_data = []
-
-    for user_id, score in user_rank.items():
-        user_data.append({"user_id": user_id, "score": score, "article_ids": get_liked_items(user_id)})
-
-    user_data = sorted(user_data, key=lambda x: x["score"], reverse=True)
-
-    max_score = max(entry["score"] for entry in user_data)
+    user_data = [
+        {"user_id": uid, "score": score, "article_ids": get_liked_items(uid)} for uid, score in user_rank.items()
+    ]
+    max_score = max(user_rank.values(), default=1)
     for user in user_data:
         user["normalized_score"] = user["score"] / max_score
 
-    article_scores = {article_id: 0.0 for article_id in articles["article_id"]}
+    article_scores = defaultdict(float)
     for user in user_data:
         for article_id in user["article_ids"]:
             article_scores[article_id] = max(article_scores[article_id], user["normalized_score"])
 
-    articles["collaborative_score"] = articles["article_id"].map(article_scores)
+    articles["collaborative_score"] = articles["article_id"].map(article_scores).fillna(0)
 
     return articles.sort_values(by="collaborative_score", ascending=False)
 
