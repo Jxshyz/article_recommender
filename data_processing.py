@@ -8,6 +8,7 @@ import pandas as pd
 from collections import defaultdict, Counter
 from scipy.sparse import load_npz, save_npz, csr_matrix
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import MinMaxScaler
 
 import sparse_matrix as sparse
 import data_loader
@@ -172,8 +173,7 @@ def get_similarity(article_id1, article_id2):
 
 
 def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
-    max_pageviews = articles["total_pageviews"].max()
-    articles["baseline_score"] = articles["total_pageviews"] / max_pageviews
+    articles["baseline_score"] = articles["total_pageviews"]
 
     if date is not None:
         date = pd.to_datetime(date)
@@ -186,6 +186,10 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
             0.0,
         )
 
+    articles["baseline_score"] = np.log1p(articles["baseline_score"])
+    scaler = MinMaxScaler()
+    articles[["baseline_score"]] = scaler.fit_transform(articles[["baseline_score"]])
+
     return articles.sort_values(by="baseline_score", ascending=False)
 
 
@@ -195,6 +199,10 @@ def content_based_filtering(articles, user_id):
     # final score of an item is the mean of all cosine similarities between this item and all liked items
     similarity_scores = similarity_matrix[:, liked_idxs]  # Shape: (num_articles, num_liked_articles)
     articles["contentbased_score"] = similarity_scores.mean(axis=1)  # Shape: (num_articles,)
+
+    articles["contentbased_score"] = np.power(articles["contentbased_score"], 1 / 2)
+    scaler = MinMaxScaler()
+    articles[["contentbased_score"]] = scaler.fit_transform(articles[["contentbased_score"]])
 
     return articles.sort_values(by="contentbased_score", ascending=False)
 
@@ -215,9 +223,8 @@ def collaborative_filtering(articles, user_id):
     user_ids = np.array(list(user_rank.keys()))
     user_idxs = [uim_u2i.get(user_id) for user_id in user_ids]
     scores = np.array(list(user_rank.values()))
-    scores = scores / scores.max() if scores.size > 0 else scores  # normalize scores
 
-    # final score of an item is the maximum normalized score of all users who liked it
+    # final score of an item is the maximum score of all users who liked it
     article_scores = defaultdict(float)
     for user_idx, score in zip(user_idxs, scores):
         # below is the most time-consuming LOC. However, it cannot be batched due to the necessary call to nonzero
@@ -225,6 +232,10 @@ def collaborative_filtering(articles, user_id):
         for article_id in liked_article_ids:
             article_scores[article_id] = max(article_scores.get(article_id, 0), score)
     articles["collaborative_score"] = articles["article_id"].map(article_scores).fillna(0)
+
+    articles["collaborative_score"] = np.log1p(articles["collaborative_score"])
+    scaler = MinMaxScaler()
+    articles[["collaborative_score"]] = scaler.fit_transform(articles[["collaborative_score"]])
 
     return articles.sort_values(by="collaborative_score", ascending=False)
 
@@ -269,3 +280,17 @@ for _, row in articles.tail(10).iterrows():
     print(
         f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
     )
+
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(10, 6))
+for col in ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score"]:
+    sns.kdeplot(articles[col], label=col, fill=True)
+
+plt.xlabel("Score")
+plt.ylabel("Density")
+plt.title("Distribution of Scores")
+plt.legend()
+plt.show()
