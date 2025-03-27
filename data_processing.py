@@ -253,6 +253,21 @@ def hybrid_filtering(articles):
     return articles.sort_values(by="hybrid_score", ascending=False)
 
 
+def plot_score_distribution(articles):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(10, 6))
+    for col in ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score"]:
+        sns.kdeplot(articles[col], label=col, fill=True)
+
+    plt.xlabel("Score")
+    plt.ylabel("Density")
+    plt.title("Distribution of Scores")
+    plt.legend()
+    plt.show()
+
+
 total_start = time.time()
 start = time.time()
 articles = baseline_filtering(articles=articles)
@@ -280,17 +295,3 @@ for _, row in articles.tail(10).iterrows():
     print(
         f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
     )
-
-
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(10, 6))
-for col in ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score"]:
-    sns.kdeplot(articles[col], label=col, fill=True)
-
-plt.xlabel("Score")
-plt.ylabel("Density")
-plt.title("Distribution of Scores")
-plt.legend()
-plt.show()
