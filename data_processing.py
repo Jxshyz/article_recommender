@@ -268,30 +268,83 @@ def plot_score_distribution(articles):
     plt.show()
 
 
-total_start = time.time()
-start = time.time()
-articles = baseline_filtering(articles=articles)
-print(f"Baseline:      {time.time() - start:4f}")
-start = time.time()
-articles = content_based_filtering(articles=articles, user_id=151570)  # randomly picked user_id
-print(f"Content-Based: {time.time() - start:4f}")
-start = time.time()
-articles = collaborative_filtering(articles=articles, user_id=151570)  # randomly picked user_id
-print(f"Collaborative: {time.time() - start:4f}")
-start = time.time()
-articles = hybrid_filtering(articles=articles)
-print(f"Hybrid:        {time.time() - start:4f}")
-print()
-print(f"Total:         {time.time() - total_start:4f}\n")
+def recommend(articles, user_id, date=None):
+    total_start = time.time()
+    start = time.time()
+    articles = baseline_filtering(articles=articles, date=date)
+    print(f"\nBaseline:      {time.time() - start:4f}")
+    start = time.time()
+    articles = content_based_filtering(articles=articles, user_id=user_id)
+    print(f"Content-Based: {time.time() - start:4f}")
+    start = time.time()
+    articles = collaborative_filtering(articles=articles, user_id=user_id)
+    print(f"Collaborative: {time.time() - start:4f}")
+    start = time.time()
+    articles = hybrid_filtering(articles=articles)
+    print(f"Hybrid:        {time.time() - start:4f}")
+    print(f"Total:         {time.time() - total_start:4f} for user_id '{user_id}'")
+    print()
 
-print(f"\nFIRST 10:")
-for _, row in articles.head(10).iterrows():
-    print(
-        f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
-    )
+    return articles
 
-print(f"\nLAST 10:")
-for _, row in articles.tail(10).iterrows():
-    print(
-        f"ID: {row['article_id']}, BL {row['baseline_score']:.4f} / CBF {row['contentbased_score']:.4f} / CF {row['collaborative_score']:.4f} / HF {row['hybrid_score']:.4f}, Title: {row['title']}"
+
+def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim_i2a, k=10, n=20):
+    total_hits = 0
+    total_precision = 0
+    total_recall = 0
+    total_ap = 0
+    total_ndcg = 0
+    users = list(uim_u2i.keys())[:n]
+
+    for user_id in users:
+        recommended = recommend(articles, user_id).nlargest(k, "hybrid_score")["article_id"].tolist()
+        liked = set(get_liked_items(user_id))
+
+        if not liked:
+            continue  # Skip users with no liked articles
+
+        hits = any(article in liked for article in recommended)
+
+        precision = len(set(recommended) & liked) / k
+
+        recall = len(set(recommended) & liked) / len(liked)
+
+        ap = 0
+        correct = 0
+        for i, article in enumerate(recommended, start=1):
+            if article in liked:
+                correct += 1
+                ap += correct / i
+        ap /= min(len(liked), k)
+
+        dcg = sum(1 / np.log2(i + 1) for i, article in enumerate(recommended, start=1) if article in liked)
+        ideal_dcg = sum(1 / np.log2(i + 1) for i in range(1, min(len(liked), k) + 1))
+        ndcg = dcg / ideal_dcg if ideal_dcg > 0 else 0
+
+        total_hits += hits
+        total_precision += precision
+        total_recall += recall
+        total_ap += ap
+        total_ndcg += ndcg
+
+    num_users = len(users)
+    return {
+        "Hit Rate": float(total_hits / num_users),
+        "Precision@K": float(total_precision / num_users),
+        "Recall@K": float(total_recall / num_users),
+        "MAP@K": float(total_ap / num_users),
+        "NDCG@K": float(total_ndcg / num_users),
+    }
+
+
+print(
+    evaluate_recommendations(
+        recommend=recommend,
+        articles=articles,
+        user_item_matrix=user_item_matrix,
+        uim_u2i=uim_u2i,
+        uim_i2a=uim_i2a,
+        k=10,
+        n=60,
     )
+)
