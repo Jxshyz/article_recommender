@@ -196,6 +196,9 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
 
 def content_based_filtering(articles, user_id):
     liked_idxs = np.array([sm_a2i[article_id] for article_id in get_liked_items(user_id)])
+    if len(liked_idxs) == 0:
+        articles["contentbased_score"] = 0
+        return articles
 
     # final score of an item is the mean of all cosine similarities between this item and all liked items
     similarity_scores = similarity_matrix[:, liked_idxs]  # Shape: (num_articles, num_liked_articles)
@@ -210,6 +213,9 @@ def content_based_filtering(articles, user_id):
 
 def collaborative_filtering(articles, user_id):
     liked_idxs = np.array([sm_a2i[article_id] for article_id in get_liked_items(user_id)])
+    if len(liked_idxs) == 0:
+        articles["collaborative_score"] = 0
+        return articles
 
     # find all items that are similar to the liked items
     similarity_scores = similarity_matrix[liked_idxs]  # Shape: (num_liked_articles, num_articles)
@@ -307,12 +313,14 @@ def temporarily_remove_liked_articles(user_id, liked_articles, user_item_matrix,
 
 
 def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim_i2a, k=10, n=20, removal_fraction=0.2):
-    total_hits = 0
-    total_precision = 0
-    total_recall = 0
-    total_ap = 0
-    total_ndcg = 0
-    users = list(uim_u2i.keys())[:n]
+    scores = ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score"]
+
+    total_hits = {score: 0 for score in scores}
+    total_precision = {score: 0 for score in scores}
+    total_recall = {score: 0 for score in scores}
+    total_ap = {score: 0 for score in scores}
+    total_ndcg = {score: 0 for score in scores}
+    users = random.sample(list(uim_u2i.keys()), n)
 
     for user_id in users:
         liked = set(get_liked_items(user_id))
@@ -326,47 +334,61 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
         recommendations = recommendations[
             ~recommendations["article_id"].isin(liked - removed)
         ]  # do not recommend liked articles
-        recommended = recommendations.nlargest(k, "hybrid_score")["article_id"].tolist()
 
-        print(
-            len(removed),
-            len(set(recommended) & removed),
-        )
+        for score in scores:
+            recommended = recommendations.nlargest(k, score)["article_id"].tolist()
 
-        hits = any(article in removed for article in recommended)
+            print(
+                len(removed),
+                len(set(recommended) & removed),
+            )
 
-        precision = len(set(recommended) & removed) / k
+            hits = any(article in removed for article in recommended)
 
-        recall = len(set(recommended) & removed) / len(removed)
+            precision = len(set(recommended) & removed) / k
 
-        ap = 0
-        correct = 0
-        for i, article in enumerate(recommended, start=1):
-            if article in removed:
-                correct += 1
-                ap += correct / i
-        ap /= min(len(removed), k)
+            recall = len(set(recommended) & removed) / len(removed)
 
-        dcg = sum(1 / np.log2(i + 1) for i, article in enumerate(recommended, start=1) if article in removed)
-        ideal_dcg = sum(1 / np.log2(i + 1) for i in range(1, min(len(removed), k) + 1))
-        ndcg = dcg / ideal_dcg if ideal_dcg > 0 else 0
+            ap = 0
+            correct = 0
+            for i, article in enumerate(recommended, start=1):
+                if article in removed:
+                    correct += 1
+                    ap += correct / i
+            ap /= min(len(removed), k)
 
-        total_hits += hits
-        total_precision += precision
-        total_recall += recall
-        total_ap += ap
-        total_ndcg += ndcg
+            dcg = sum(1 / np.log2(i + 1) for i, article in enumerate(recommended, start=1) if article in removed)
+            ideal_dcg = sum(1 / np.log2(i + 1) for i in range(1, min(len(removed), k) + 1))
+            ndcg = dcg / ideal_dcg if ideal_dcg > 0 else 0
+
+            total_hits[score] += hits
+            total_precision[score] += precision
+            total_recall[score] += recall
+            total_ap[score] += ap
+            total_ndcg[score] += ndcg
 
         user_item_matrix[:] = original_matrix
 
     num_users = len(users)
-    return {
-        "Hit Rate": float(total_hits / num_users),
-        "Precision@K": float(total_precision / num_users),
-        "Recall@K": float(total_recall / num_users),
-        "MAP@K": float(total_ap / num_users),
-        "NDCG@K": float(total_ndcg / num_users),
+    results = {
+        score: {
+            "Hit Rate": float(total_hits[score] / num_users),
+            "Precision@K": float(total_precision[score] / num_users),
+            "Recall@K": float(total_recall[score] / num_users),
+            "MAP@K": float(total_ap[score] / num_users),
+            "NDCG@K": float(total_ndcg[score] / num_users),
+        }
+        for score in scores
     }
+
+    data = {score.replace("_score", ""): [] for score in results.keys()}
+    metrics = list(next(iter(results.values())).keys())
+
+    for score in results:
+        for metric in metrics:
+            data[score.replace("_score", "")].append(results[score][metric])
+
+    return pd.DataFrame(data, index=metrics)
 
 
 print(len(uim_a2i), len(uim_i2a), len(sm_a2i), len(sm_i2a), len(uim_u2i), len(uim_i2u))
@@ -378,8 +400,8 @@ print(
         user_item_matrix=user_item_matrix,
         uim_u2i=uim_u2i,
         uim_i2a=uim_i2a,
-        k=20,
-        n=5,
+        k=40,
+        n=40,
         removal_fraction=0.2,
     )
 )
