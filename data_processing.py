@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import gdown
 import pickle
 import numpy as np
+import random
 import pandas as pd
 from collections import defaultdict, Counter
 from scipy.sparse import load_npz, save_npz, csr_matrix
@@ -288,7 +289,24 @@ def recommend(articles, user_id, date=None):
     return articles
 
 
-def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim_i2a, k=10, n=20):
+def temporarily_remove_liked_articles(user_id, liked_articles, user_item_matrix, removal_fraction=0.2):
+    """Temporarily removes a fraction of liked articles for a given user."""
+    original_matrix = user_item_matrix.copy()  # Store a copy of the original matrix
+
+    num_to_remove = max(1, int(len(liked_articles) * removal_fraction))  # At least 1 article
+    removed_articles = random.sample(list(liked_articles), num_to_remove)
+
+    user_idx = uim_u2i[user_id]
+
+    # Set the selected articles to 0 (removing the 'like')
+    for article in removed_articles:
+        article_idx = uim_a2i[article]
+        user_item_matrix[user_idx, article_idx] = 0
+
+    return original_matrix
+
+
+def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim_i2a, k=10, n=20, removal_fraction=0.2):
     total_hits = 0
     total_precision = 0
     total_recall = 0
@@ -297,11 +315,14 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
     users = list(uim_u2i.keys())[:n]
 
     for user_id in users:
-        recommended = recommend(articles, user_id).nlargest(k, "hybrid_score")["article_id"].tolist()
         liked = set(get_liked_items(user_id))
 
         if not liked:
             continue  # Skip users with no liked articles
+
+        original_matrix = temporarily_remove_liked_articles(user_id, liked, user_item_matrix, removal_fraction)
+
+        recommended = recommend(articles, user_id).nlargest(k, "hybrid_score")["article_id"].tolist()
 
         hits = any(article in liked for article in recommended)
 
@@ -327,6 +348,8 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
         total_ap += ap
         total_ndcg += ndcg
 
+        user_item_matrix[:] = original_matrix
+
     num_users = len(users)
     return {
         "Hit Rate": float(total_hits / num_users),
@@ -345,6 +368,7 @@ print(
         uim_u2i=uim_u2i,
         uim_i2a=uim_i2a,
         k=10,
-        n=60,
+        n=20,
+        removal_fraction=0.2,
     )
 )
