@@ -303,7 +303,7 @@ def temporarily_remove_liked_articles(user_id, liked_articles, user_item_matrix,
         article_idx = uim_a2i[article]
         user_item_matrix[user_idx, article_idx] = 0
 
-    return original_matrix
+    return original_matrix, set(removed_articles)
 
 
 def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim_i2a, k=10, n=20, removal_fraction=0.2):
@@ -320,26 +320,35 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
         if not liked:
             continue  # Skip users with no liked articles
 
-        original_matrix = temporarily_remove_liked_articles(user_id, liked, user_item_matrix, removal_fraction)
+        original_matrix, removed = temporarily_remove_liked_articles(user_id, liked, user_item_matrix, removal_fraction)
 
-        recommended = recommend(articles, user_id).nlargest(k, "hybrid_score")["article_id"].tolist()
+        recommendations = recommend(articles, user_id)
+        recommendations = recommendations[
+            ~recommendations["article_id"].isin(liked - removed)
+        ]  # do not recommend liked articles
+        recommended = recommendations.nlargest(k, "hybrid_score")["article_id"].tolist()
 
-        hits = any(article in liked for article in recommended)
+        print(
+            len(removed),
+            len(set(recommended) & removed),
+        )
 
-        precision = len(set(recommended) & liked) / k
+        hits = any(article in removed for article in recommended)
 
-        recall = len(set(recommended) & liked) / len(liked)
+        precision = len(set(recommended) & removed) / k
+
+        recall = len(set(recommended) & removed) / len(removed)
 
         ap = 0
         correct = 0
         for i, article in enumerate(recommended, start=1):
-            if article in liked:
+            if article in removed:
                 correct += 1
                 ap += correct / i
-        ap /= min(len(liked), k)
+        ap /= min(len(removed), k)
 
-        dcg = sum(1 / np.log2(i + 1) for i, article in enumerate(recommended, start=1) if article in liked)
-        ideal_dcg = sum(1 / np.log2(i + 1) for i in range(1, min(len(liked), k) + 1))
+        dcg = sum(1 / np.log2(i + 1) for i, article in enumerate(recommended, start=1) if article in removed)
+        ideal_dcg = sum(1 / np.log2(i + 1) for i in range(1, min(len(removed), k) + 1))
         ndcg = dcg / ideal_dcg if ideal_dcg > 0 else 0
 
         total_hits += hits
@@ -360,6 +369,8 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
     }
 
 
+print(len(uim_a2i), len(uim_i2a), len(sm_a2i), len(sm_i2a), len(uim_u2i), len(uim_i2u))
+
 print(
     evaluate_recommendations(
         recommend=recommend,
@@ -367,8 +378,8 @@ print(
         user_item_matrix=user_item_matrix,
         uim_u2i=uim_u2i,
         uim_i2a=uim_i2a,
-        k=10,
-        n=20,
+        k=20,
+        n=5,
         removal_fraction=0.2,
     )
 )
