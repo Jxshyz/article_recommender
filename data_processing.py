@@ -268,10 +268,14 @@ def plot_score_distribution(articles):
     for col in ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score"]:
         sns.kdeplot(articles[col], label=col, fill=True)
 
-    plt.xlabel("Score")
-    plt.ylabel("Density")
-    plt.title("Distribution of Scores")
+    plt.xlabel("Score", fontsize=20)
+    plt.ylabel("Density", fontsize=20)
+    plt.title("Distribution of Scores", fontsize=22, fontweight="bold")
     plt.legend()
+    plt.legend(fontsize=18)
+    plt.xticks(fontsize=18)
+    plt.yticks(fontsize=18)
+    plt.grid(True, linestyle="--", alpha=0.6)
     plt.show()
 
 
