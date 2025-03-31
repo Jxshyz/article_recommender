@@ -442,6 +442,7 @@ def analyze_data():
     plt.xticks(fontsize=18)
     plt.yticks(fontsize=18)
     plt.grid(True, linestyle="--", alpha=0.6)
+    plt.tight_layout()  # Adjust layout to prevent clipping
     plt.savefig(os.path.join(output_dir, "publication_date_distribution_year.png"))
     plt.close()
 
@@ -461,6 +462,7 @@ def analyze_data():
     plt.xticks(fontsize=18, rotation=45)
     plt.yticks(fontsize=18)
     plt.grid(True, linestyle="--", alpha=0.6)
+    plt.tight_layout()  # Adjust layout to prevent clipping
     plt.savefig(os.path.join(output_dir, "publication_date_distribution_2023.png"))
     plt.close()
 
