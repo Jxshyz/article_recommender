@@ -112,11 +112,6 @@ def get_preprocessed_user_item_matrix():
     return user_item_matrix, uim_u2i, uim_a2i, uim_i2u, uim_i2a
 
 
-# setup
-pd.set_option("display.max_rows", None)
-pd.set_option("display.max_columns", None)
-pd.set_option("display.max_colwidth", None)
-
 user_item_matrix, uim_u2i, uim_a2i, uim_i2u, uim_i2a = get_preprocessed_user_item_matrix()
 
 
@@ -395,7 +390,6 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
     return pd.DataFrame(data, index=metrics)
 
 
-print(len(uim_a2i), len(uim_i2a), len(sm_a2i), len(sm_i2a), len(uim_u2i), len(uim_i2u))
 
 print(
     evaluate_recommendations(
@@ -405,7 +399,7 @@ print(
         uim_u2i=uim_u2i,
         uim_i2a=uim_i2a,
         k=40,
-        n=40,
+        n=5,
         removal_fraction=0.2,
     )
 )
