@@ -1,4 +1,0 @@
-pandas
-gdown
-datetime
-sentence_transformers

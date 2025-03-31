@@ -11,8 +11,8 @@ from scipy.sparse import load_npz, save_npz, csr_matrix
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MinMaxScaler
 
-import sparse_matrix as sparse
-import data_loader
+import utils.sparse_matrix as sparse
+import utils.data_loader
 
 data_folder = "data"
 preprocessed_folder = os.path.join(data_folder, "preprocessed")
@@ -388,7 +388,6 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
             data[score.replace("_score", "")].append(results[score][metric])
 
     return pd.DataFrame(data, index=metrics)
-
 
 
 print(
