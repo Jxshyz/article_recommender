@@ -10,6 +10,7 @@ from collections import defaultdict, Counter
 from scipy.sparse import load_npz, save_npz, csr_matrix
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
 
 import utils.sparse_matrix as sparse
 import utils.data_loader
@@ -95,7 +96,8 @@ def get_preprocessed_user_item_matrix():
 
         Articles, behaviour_test, history_test, behaviour_value, history_value = data_loader.load()
 
-        # compute user-item-matrix and save mappings from / to matrix index
+        # compute user-item-matrix and save mappings from user_id / article_id to matrix index and vice versa
+        # uim = user_item_matrix, u2i = user_id to index (in matrix)
         user_item_matrix, uim_u2i, uim_a2i, uim_i2u, uim_i2a = sparse.create_sparse(
             "data", Articles, behaviour_test, history_test, behaviour_value, history_value, matrix_file
         )
@@ -143,7 +145,8 @@ def get_preprocessed_similarities():
 
         embeddings = np.vstack(articles["embedding"].values)
 
-        # compute pairwise cosine similarities and save mappings from / to matrix index
+        # compute pairwise cosine similarities and save mappings from article_id to matrix index and vice versa
+        # sm = similarity_matrix, a2i = article_id to index (of matrix)
         sm_i2a = articles["article_id"].values
         similarity_matrix = cosine_similarity(embeddings)
         sm_a2i = {article_id: idx for idx, article_id in enumerate(sm_i2a)}
@@ -172,7 +175,6 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
     articles["baseline_score"] = articles["total_pageviews"]
 
     if date is not None:
-        date = pd.to_datetime(date)
         end_date = date
         start_date = date - max_age
 
@@ -182,6 +184,10 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
             0.0,
         )
 
+    # generate a random score for articles within the date range for comparison
+    articles["random_score"] = np.where(articles["baseline_score"] > 0.0000001, np.random.rand(len(articles)), 0.0)
+
+    # normalize the scores for smoother distribution
     articles["baseline_score"] = np.log1p(articles["baseline_score"])
     scaler = MinMaxScaler()
     articles[["baseline_score"]] = scaler.fit_transform(articles[["baseline_score"]])
@@ -199,6 +205,7 @@ def content_based_filtering(articles, user_id):
     similarity_scores = similarity_matrix[:, liked_idxs]  # Shape: (num_articles, num_liked_articles)
     articles["contentbased_score"] = similarity_scores.mean(axis=1)  # Shape: (num_articles,)
 
+    # normalize the scores for smoother distribution
     articles["contentbased_score"] = np.power(articles["contentbased_score"], 1 / 2)
     scaler = MinMaxScaler()
     articles[["contentbased_score"]] = scaler.fit_transform(articles[["contentbased_score"]])
@@ -235,6 +242,7 @@ def collaborative_filtering(articles, user_id):
             article_scores[article_id] = max(article_scores.get(article_id, 0), score)
     articles["collaborative_score"] = articles["article_id"].map(article_scores).fillna(0)
 
+    # normalize the scores for smoother distribution
     articles["collaborative_score"] = np.log1p(articles["collaborative_score"])
     scaler = MinMaxScaler()
     articles[["collaborative_score"]] = scaler.fit_transform(articles[["collaborative_score"]])
@@ -274,10 +282,10 @@ def plot_score_distribution(articles):
     plt.show()
 
 
-def recommend(articles, user_id, date=None):
+def recommend(articles, user_id, date=None, max_age=None):
     total_start = time.time()
     start = time.time()
-    articles = baseline_filtering(articles=articles, date=date)
+    articles = baseline_filtering(articles=articles, date=date, max_age=max_age)
     print(f"\nBaseline:      {time.time() - start:4f}")
     start = time.time()
     articles = content_based_filtering(articles=articles, user_id=user_id)
@@ -296,52 +304,62 @@ def recommend(articles, user_id, date=None):
 
 def temporarily_remove_liked_articles(user_id, liked_articles, user_item_matrix, removal_fraction=0.2):
     """Temporarily removes a fraction of liked articles for a given user."""
-    original_matrix = user_item_matrix.copy()  # Store a copy of the original matrix
+    # copy is necessary because original matrix is adjusted before generating test recommendations
+    original_matrix = user_item_matrix.copy()
 
+    # get articles liked by user and sort them by publication time
+    recent_articles = articles[articles["article_id"].isin(liked_articles)]
+    recent_articles = recent_articles.sort_values("published_time", ascending=False)
+    newest_article = recent_articles.iloc[0]
+
+    # calculate the number of articles to remove and select the most recent ones to remove
     num_to_remove = max(1, int(len(liked_articles) * removal_fraction))  # At least 1 article
-    removed_articles = random.sample(list(liked_articles), num_to_remove)
+    removed_articles = recent_articles.nlargest(num_to_remove, "published_time")
+    oldest_removed_article = removed_articles.iloc[-1]
+    timedelta_diff = newest_article["published_time"] - oldest_removed_article["published_time"] + pd.Timedelta(days=3)
 
+    # remove the like of user_id and selected articles to remove (set according value in user_item_matrix to 0)
     user_idx = uim_u2i[user_id]
-
-    # Set the selected articles to 0 (removing the 'like')
-    for article in removed_articles:
-        article_idx = uim_a2i[article]
+    for article_id in removed_articles["article_id"]:
+        article_idx = uim_a2i[article_id]
         user_item_matrix[user_idx, article_idx] = 0
 
-    return original_matrix, set(removed_articles)
+    return original_matrix, set(removed_articles["article_id"]), newest_article["published_time"], timedelta_diff
 
 
 def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim_i2a, k=10, n=20, removal_fraction=0.2):
-    scores = ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score"]
+    scores = ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score", "random_score"]
 
     total_hits = {score: 0 for score in scores}
     total_precision = {score: 0 for score in scores}
     total_recall = {score: 0 for score in scores}
     total_ap = {score: 0 for score in scores}
     total_ndcg = {score: 0 for score in scores}
-    users = random.sample(list(uim_u2i.keys()), n)
 
+    # evaluate recommendations for n randomly sampled users
+    users = random.sample(list(uim_u2i.keys()), n)
     for user_id in users:
         liked = set(get_liked_items(user_id))
 
+        # skip users with no liked articles (avoids division by zero)
         if not liked:
-            continue  # Skip users with no liked articles
+            continue
 
-        original_matrix, removed = temporarily_remove_liked_articles(user_id, liked, user_item_matrix, removal_fraction)
+        # remove the likes for a fraction of liked articles ("removed") and test whether the algorithm would recommend them again
+        original_matrix, removed, newest_date, max_age = temporarily_remove_liked_articles(
+            user_id, liked, user_item_matrix, removal_fraction
+        )
 
-        recommendations = recommend(articles, user_id)
-        recommendations = recommendations[
-            ~recommendations["article_id"].isin(liked - removed)
-        ]  # do not recommend liked articles
+        # generate recommendations and remove articles that user already liked
+        recommendations = recommend(articles, user_id, date=newest_date, max_age=max_age)
+        recommendations = recommendations[~recommendations["article_id"].isin(liked - removed)]
 
+        # evaluate recommendations for each score
         for score in scores:
+            # get top k recommendations based on the current score and compute metrics
             recommended = recommendations.nlargest(k, score)["article_id"].tolist()
 
-            print(
-                len(removed),
-                len(set(recommended) & removed),
-            )
-
+            # ==== Metrics ===
             hits = any(article in removed for article in recommended)
 
             precision = len(set(recommended) & removed) / k
@@ -366,8 +384,10 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
             total_ap[score] += ap
             total_ndcg[score] += ndcg
 
+        # restore matrix from before like removal
         user_item_matrix[:] = original_matrix
 
+    # normalize scores
     num_users = len(users)
     results = {
         score: {
@@ -380,9 +400,9 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
         for score in scores
     }
 
+    # convert results to pandas dataframe
     data = {score.replace("_score", ""): [] for score in results.keys()}
     metrics = list(next(iter(results.values())).keys())
-
     for score in results:
         for metric in metrics:
             data[score.replace("_score", "")].append(results[score][metric])
@@ -392,7 +412,6 @@ def evaluate_recommendations(recommend, articles, user_item_matrix, uim_u2i, uim
 
 def analyze_data():
     import seaborn as sns
-    import matplotlib.pyplot as plt
 
     # Ensure output directory exists
     output_dir = "./output"
@@ -428,9 +447,8 @@ def analyze_data():
     plt.savefig(os.path.join(output_dir, "article_length_distribution.png"))
     plt.close()
 
-    # 2) Publication Date Distribution (line plot of daily counts)
+    # 2) Publication Date Distribution
     plt.figure(figsize=(10, 6))
-
     # Extract year from the publication date and count the number of articles per year
     raw_articles["year"] = raw_articles["published_time"].dt.year
     pub_years = raw_articles["year"].dropna().value_counts().sort_index()
@@ -446,16 +464,14 @@ def analyze_data():
     plt.savefig(os.path.join(output_dir, "publication_date_distribution_year.png"))
     plt.close()
 
+    # 2) Publication Date Distribution
+    plt.figure(figsize=(10, 6))
     # Filter articles from 2023
     articles_2023 = raw_articles[raw_articles["published_time"].dt.year == 2023]
-
-    # 2) Publication Date Distribution (line plot of daily counts for 2023)
-    plt.figure(figsize=(10, 6))
     # Extract the date and count the number of articles per date in 2023
     pub_dates_2023 = articles_2023["published_time"].dropna().dt.date.value_counts().sort_index()
     # Plot the data as a line plot (daily counts)
     pub_dates_2023.plot(kind="line", marker="o", linestyle="-")
-
     plt.xlabel("Publication Date", fontsize=20)
     plt.ylabel("Number of Articles", fontsize=20)
     plt.title("Publication Date Distribution for 2023", fontsize=22, fontweight="bold")
@@ -550,8 +566,8 @@ print(
         user_item_matrix=user_item_matrix,
         uim_u2i=uim_u2i,
         uim_i2a=uim_i2a,
-        k=40,
-        n=5,
+        k=100,
+        n=200,
         removal_fraction=0.2,
     )
 )
