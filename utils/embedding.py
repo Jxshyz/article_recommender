@@ -2,6 +2,23 @@
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import nltk
+import re
+
+nltk.download("stopwords")
+nltk.download("punkt")
+nltk.download("punkt_tab")
+
+danish_stopwords = set(stopwords.words("danish"))
+
+
+def remove_stopwords(text):
+    tokens = word_tokenize(text, language="danish")
+    filtered_tokens = [w for w in tokens if w.lower() not in danish_stopwords and re.match(r"\w+", w)]
+    return " ".join(filtered_tokens)
+
 
 def generate_embeddings(articles):
     """
@@ -20,7 +37,9 @@ def generate_embeddings(articles):
 
     # Combine relevant text fields into a single string per article for embedding
     articles["aggregated_text"] = articles[["title", "subtitle", "category_str", "body"]].apply(
-        lambda x: f"TITLE: {x['title']}\n\n\nSUBTITLE: {x['subtitle']}\n\n\nCATEGORY: {x['category_str']}\n\n\nCONTENT: {x['body']}",
+        lambda x: remove_stopwords(
+            f"TITLE: {x['title']}\n\n\nSUBTITLE: {x['subtitle']}\n\n\nCATEGORY: {x['category_str']}\n\n\nCONTENT: {x['body']}"
+        ),
         axis=1,
     )
 
