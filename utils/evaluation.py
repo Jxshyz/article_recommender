@@ -75,7 +75,7 @@ def evaluate_recommendations(
         pd.DataFrame: A DataFrame summarizing evaluation metrics for each scoring method.
     """
     # Scoring strategies used in the recommendation output
-    scores = ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score"]
+    scores = ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score", "ncf_score"]
 
     # Initialize accumulators for evaluation metrics
     total_hits = {score: 0 for score in scores}

@@ -65,8 +65,8 @@ def main():
             sm_a2i,
             similarity_matrix,
             sm_i2a,
-            k=40,
-            n=5,
+            k=500,
+            n=100,
         )
         print("Evaluation Results:")
         print(eval_results)
