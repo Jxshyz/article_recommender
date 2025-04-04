@@ -16,7 +16,7 @@ from tqdm import tqdm
 def create_interaction_df(force=False):
     output_path = os.path.join("data", "preprocessed", "interactions_long.csv")
     if os.path.exists(output_path) and not force:
-        print(f"[✓] interactions_long.csv exists – skipping creation.")
+        print(f"[DONE] interactions_long.csv exists – skipping creation.")
         return
 
     print("[!] Creating interactions_long.csv...")
@@ -69,7 +69,7 @@ def create_interaction_df(force=False):
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df_interactions.to_csv(output_path, index=False)
-    print(f"[✓] Created: {output_path} with {len(df_interactions)} rows")
+    print(f"[DONE] Created: {output_path} with {len(df_interactions)} rows")
 
 
 def create_balanced_interaction_df():
@@ -100,7 +100,7 @@ def create_balanced_interaction_df():
     negatives = []
     np.random.seed(42)
 
-    print("[•] Sampling negative interactions...")
+    print("[.] Sampling negative interactions...")
     with tqdm(total=len(df_positive)) as pbar:
         while len(negatives) < len(df_positive):
             u = np.random.choice(all_user_ids)
@@ -126,7 +126,7 @@ def create_balanced_interaction_df():
     # Save CSV
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df_all.to_csv(output_path, index=False)
-    print(f"[✓] Created: {output_path} with {len(df_all)} rows")
+    print(f"[DONE] Created: {output_path} with {len(df_all)} rows")
 
 
 # =========================
@@ -180,7 +180,7 @@ def train_ncf(
     lr=0.001,
 ):
     if os.path.exists(model_path) and os.path.exists(mapping_path):
-        print("[✓] NCF model and mappings already exist – skipping training.")
+        print("[DONE] NCF model and mappings already exist – skipping training.")
         return
 
     create_balanced_interaction_df()
@@ -231,5 +231,5 @@ def train_ncf(
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     torch.save(model.state_dict(), model_path)
     torch.save({"user2idx": user2idx, "item2idx": item2idx, "idx2item": idx2item}, mapping_path)
-    print(f"[✓] Model saved to {model_path}")
-    print(f"[✓] Mappings saved to {mapping_path}")
+    print(f"[DONE] Model saved to {model_path}")
+    print(f"[DONE] Mappings saved to {mapping_path}")
