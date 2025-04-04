@@ -6,7 +6,7 @@ from utils.recommender import recommend  # Custom recommendation function
 
 
 def temporarily_remove_liked_articles(
-    user_id, liked_articles, user_item_matrix, uim_u2i, uim_a2i, removal_fraction=0.2
+    user_id, articles, liked_articles, user_item_matrix, uim_u2i, uim_a2i, removal_fraction=0.2
 ):
     """
     Temporarily removes a fraction of liked articles from the user-item interaction matrix
@@ -111,7 +111,7 @@ def evaluate_recommendations(
 
         # Temporarily remove a fraction of liked articles
         original_matrix, removed, newest_date, max_age = temporarily_remove_liked_articles(
-            user_id, liked, user_item_matrix, uim_u2i, uim_a2i, removal_fraction
+            user_id, articles, liked, user_item_matrix, uim_u2i, uim_a2i, removal_fraction
         )
 
         # Get recommendations from the system
