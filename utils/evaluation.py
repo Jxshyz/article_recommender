@@ -26,16 +26,25 @@ def temporarily_remove_liked_articles(
             - A set of removed article IDs.
     """
     original_matrix = user_item_matrix.copy()  # Backup original state
-    num_to_remove = max(1, int(len(liked_articles) * removal_fraction))  # Ensure at least one is removed
-    removed_articles = random.sample(list(liked_articles), num_to_remove)  # Randomly select articles to remove
-    user_idx = uim_u2i[user_id]  # Get user's index in the matrix
 
-    # Zero out the selected articles for the user
-    for article in removed_articles:
-        article_idx = uim_a2i[article]
+    # get articles liked by user and sort them by publication time
+    recent_articles = articles[articles["article_id"].isin(liked_articles)]
+    recent_articles = recent_articles.sort_values("published_time", ascending=False)
+    newest_article = recent_articles.iloc[0]
+
+    # calculate the number of articles to remove and select the most recent ones to remove
+    num_to_remove = max(1, int(len(liked_articles) * removal_fraction))  # Ensure at least one is removed
+    removed_articles = recent_articles.nlargest(num_to_remove, "published_time")
+    oldest_removed_article = removed_articles.iloc[-1]
+    timedelta_diff = newest_article["published_time"] - oldest_removed_article["published_time"] + pd.Timedelta(days=3)
+
+    # remove the like of user_id and selected articles to remove (set according value in user_item_matrix to 0)
+    user_idx = uim_u2i[user_id]
+    for article_id in removed_articles["article_id"]:
+        article_idx = uim_a2i[article_id]
         user_item_matrix[user_idx, article_idx] = 0
 
-    return original_matrix, set(removed_articles)
+    return original_matrix, set(removed_articles["article_id"]), newest_article["published_time"], timedelta_diff
 
 
 def evaluate_recommendations(
@@ -75,7 +84,14 @@ def evaluate_recommendations(
         pd.DataFrame: A DataFrame summarizing evaluation metrics for each scoring method.
     """
     # Scoring strategies used in the recommendation output
-    scores = ["baseline_score", "contentbased_score", "collaborative_score", "hybrid_score", "ncf_score"]
+    scores = [
+        "random_score",
+        "baseline_score",
+        "contentbased_score",
+        "collaborative_score",
+        "ncf_score",
+        "hybrid_score",
+    ]
 
     # Initialize accumulators for evaluation metrics
     total_hits = {score: 0 for score in scores}
@@ -94,13 +110,24 @@ def evaluate_recommendations(
             continue  # Skip users with no likes
 
         # Temporarily remove a fraction of liked articles
-        original_matrix, removed = temporarily_remove_liked_articles(
+        original_matrix, removed, newest_date, max_age = temporarily_remove_liked_articles(
             user_id, liked, user_item_matrix, uim_u2i, uim_a2i, removal_fraction
         )
 
         # Get recommendations from the system
         recommendations = recommend(
-            articles, user_id, uim_u2i, user_item_matrix, uim_i2u, uim_i2a, uim_a2i, sm_a2i, similarity_matrix, sm_i2a
+            articles,
+            user_id,
+            uim_u2i,
+            user_item_matrix,
+            uim_i2u,
+            uim_i2a,
+            uim_a2i,
+            sm_a2i,
+            similarity_matrix,
+            sm_i2a,
+            date=newest_date,
+            max_age=max_age,
         )
 
         # Filter out articles already liked but not removed (keep only unseen or removed ones)

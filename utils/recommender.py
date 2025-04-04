@@ -83,7 +83,6 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
     articles["baseline_score"] = articles["total_pageviews"]
 
     if date is not None:
-        date = pd.to_datetime(date)
         end_date = date
         start_date = date - max_age
 
@@ -93,6 +92,9 @@ def baseline_filtering(articles, date=None, max_age=timedelta(days=7)):
             articles["baseline_score"],
             0.0,
         )
+
+    # generate a random score for articles within the date range for comparison
+    articles["random_score"] = np.where(articles["baseline_score"] > 0.0000001, np.random.rand(len(articles)), 0.0)
 
     # Log transform and normalize
     articles["baseline_score"] = np.log1p(articles["baseline_score"])
@@ -234,6 +236,7 @@ def recommend(
     similarity_matrix,
     sm_i2a,
     date=None,
+    max_age=None,
 ):
     """
     Run the full recommendation pipeline (baseline, content-based, collaborative, hybrid).
@@ -245,7 +248,7 @@ def recommend(
 
     # Baseline
     start = time.time()
-    articles = baseline_filtering(articles=articles, date=date)
+    articles = baseline_filtering(articles=articles, date=date, max_age=max_age)
     print(f"\nBaseline:      {time.time() - start:.4f}")
 
     # Content-Based
